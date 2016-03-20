@@ -8,13 +8,13 @@
 -- as one uninterrupted group, and (b) buckets of a histogram appear in
 -- increasing numerical order. We satisfy that by carefully constructing full
 -- metric names (i.e. metric name along with all labels) so that they meet
--- those requirements while simply sorted alphabetically. In particular:
+-- those requirements while being sorted alphabetically. In particular:
 --
 --  * all labels for a given metric are sorted by their keys, except for the
 --    "le" label which always goes last;
 --  * bucket boundaries (which are exposed as values of the "le" label) are
---    presented as floating point numbers with leading and trailing zeroes. The
---    amount of zeroes is detected for each bucketer automatically based on
+--    presented as floating point numbers with leading and trailing zeroes.
+--    Number of of zeroes is determined for each bucketer automatically based on
 --    bucket boundaries;
 --  * internally "+Inf" bucket is stored as "Inf" (to make it appear after
 --    all numeric buckets), and gets replaced by "+Inf" just before we
@@ -39,8 +39,8 @@ Prometheus.initialized = false
 
 -- Generate full metric name that includes all labels.
 --
--- To make metric names consistent, labels are sorted in alphabetical order
--- (with the exception of "le" label which always goes last).
+-- To make metric names reproducible, labels are sorted in alphabetical order,
+-- with the exception of "le" which always goes last.
 --
 -- full_metric_name("omg", {foo="one", bar="two"}) => 'omg{bar="two",foo="one"}'
 --
@@ -74,9 +74,9 @@ local function full_metric_name(name, labels)
   return name .. "{" .. table.concat(label_parts, ",") .. "}"
 end
 
--- Construct bucket format for a list of buckets.
+-- Construct bucket format for a list of bucketers.
 --
--- This receives a table mapping bucketer type to a list of buckets and returns
+-- This receives a table mapping bucketer name to a list of buckets and returns
 -- a sprintf template that should be used for bucket boundaries of each
 -- bucketer to make them come in increasing order when sorted alphabetically.
 --
@@ -154,8 +154,8 @@ function Prometheus:log_error_kv(key, value, err)
     "Error while setting '", key, "' to '", value, "': '", err, "'")
 end
 
--- Set a given value into the dictionary key. This over-writes any existing
--- values, so we use it only to initialize metrics.
+-- Set a given dictionary key.
+-- This overwrites existing values, so we use it only to initialize metrics.
 function Prometheus:set(key, value)
   local ok, err = self.dict:safe_set(key, value)
   if not ok then
@@ -211,11 +211,12 @@ function Prometheus:histogram_observe(name, labels, value, bucketer)
     return
   end
 
-  bucketer = bucketer or "latency"
   if labels and labels["le"] then
     self:log_error_kv(name, value, "'le' is not a valid label name")
     return
   end
+
+  bucketer = bucketer or "latency"
   if self.bucketers[bucketer] == nil then
     self:log_error_kv(name, value, bucketer .. " is not a valid bucketer")
     return
@@ -274,10 +275,10 @@ function Prometheus:collect()
       local bucket_suffix, _ = key:find("_bucket{")
       if bucket_suffix and key:find("le=") then
         -- Prometheus expects all histograms to have a type declaration.
-        local short_key = key:sub(1, bucket_suffix - 1)
-        if not seen_histograms[short_key] then
-          ngx.say("# TYPE " .. short_key .. " histogram")
-          seen_histograms[short_key] = true
+        local metric_name = key:sub(1, bucket_suffix - 1)
+        if not seen_histograms[metric_name] then
+          ngx.say("# TYPE " .. metric_name .. " histogram")
+          seen_histograms[metric_name] = true
         end
       end
       -- Replace "Inf" with "+Inf" in each metric's last bucket 'le' label.

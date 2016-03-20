@@ -170,6 +170,11 @@ end
 --   labels: (table) a table mapping label keys to values.
 --   value: (number) value to add.
 function Prometheus:incr(name, labels, value)
+  if not self.initialized then
+    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
+    return
+  end
+
   local key = full_metric_name(name, labels)
   if value < 0 then
     self:log_error_kv(key, value, "Value should not be negative")
@@ -201,6 +206,11 @@ end
 --   bucketer: (string) name of a bucketer to use. Default latency bucketer
 --     will be used if unspecified.
 function Prometheus:histogram_observe(name, labels, value, bucketer)
+  if not self.initialized then
+    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
+    return
+  end
+
   bucketer = bucketer or "latency"
   if labels and labels["le"] then
     self:log_error_kv(name, value, "'le' is not a valid label name")
@@ -233,11 +243,6 @@ end
 -- Args:
 --   labels: (table) a table mapping label keys to values. Optional.
 function Prometheus:measure(labels)
-  if not self.initialized then
-    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
-    return
-  end
-
   local labels_with_status = extend_table({status = ngx.var.status}, labels)
   self:incr("nginx_http_requests_total", labels_with_status, 1)
 

@@ -1,13 +1,13 @@
 # Nginx exporter for Prometheus
 
-This is a lua module that can be used with Nginx to keep track of metrics and
+This is a Lua module that can be used with Nginx to keep track of metrics and
 expose them on a separate web page that can be scraped by
 [prometheus](https://prometheus.io).
 
 ## Quick start guide
 
 You would need to install nginx package with lua support (`nginx-extras` on
-Debian) and make `prometheus.lua` available in your LUA_PATH (or just point
+Debian) and make `prometheus.lua` available in your `LUA_PATH` (or just point
 `lua_package_path` to a directory with this git repo).
 
 To initialize the module, add the following to your `nginx.conf`. On Debian

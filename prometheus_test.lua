@@ -62,8 +62,16 @@ end
 function TestPrometheus:testInit()
   local p = prometheus.init("metrics")
   assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+  assertEquals(ngx.logs, nil)
 end
-function TestPrometheus:testErrorCounter()
+function TestPrometheus:testErrorUnitialized()
+  local p = prometheus
+  p:incr("m1", nil, 1)
+  p:histogram_observe("l1", nil, 0.35)
+
+  assertEquals(table.getn(ngx.logs), 2)
+end
+function TestPrometheus:testErrorNoMemory()
   local p = prometheus.init("metrics")
   p:incr("metric1", nil, 5)
   p:incr("willnotfit", nil, 1)
@@ -71,6 +79,31 @@ function TestPrometheus:testErrorCounter()
   assertEquals(self.dict:get("metric1"), 5)
   assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
   assertEquals(self.dict:get("willnotfit"), nil)
+  assertEquals(table.getn(ngx.logs), 1)
+end
+function TestPrometheus:testErrorNegativeValue()
+  local p = prometheus.init("metrics")
+  p:incr("metric1", nil, -5)
+
+  assertEquals(self.dict:get("metric1"), nil)
+  assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
+  assertEquals(table.getn(ngx.logs), 1)
+end
+function TestPrometheus:testErrorInvalidLabels()
+  local p = prometheus.init("metrics")
+  p:histogram_observe("l1", {le="ok"}, 0.001)
+
+  assertEquals(self.dict:get("l1"), nil)
+  assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
+  assertEquals(table.getn(ngx.logs), 1)
+end
+function TestPrometheus:testErrorInvalidBucketer()
+  local p = prometheus.init("metrics")
+  p:histogram_observe("l1", {site="site1"}, 0.001, "bucketer")
+
+  assertEquals(self.dict:get("l1"), nil)
+  assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
+  assertEquals(table.getn(ngx.logs), 1)
 end
 function TestPrometheus:testCounters()
   local p = prometheus.init("metrics")
@@ -80,6 +113,7 @@ function TestPrometheus:testCounters()
 
   assertEquals(self.dict:get("metric1"), 5)
   assertEquals(self.dict:get('metric2{f1="v1",f2="v2"}'), 4)
+  assertEquals(ngx.logs, nil)
 end
 function TestPrometheus:testLatencyHistogram()
   local p = prometheus.init("metrics")
@@ -100,6 +134,7 @@ function TestPrometheus:testLatencyHistogram()
   assertEquals(self.dict:get('l1_bucket{site="site1",var="ok",le="Inf"}'), 2)
   assertEquals(self.dict:get('l1_count{site="site1",var="ok"}'), 2)
   assertEquals(self.dict:get('l1_sum{site="site1",var="ok"}'), 0.151)
+  assertEquals(ngx.logs, nil)
 end
 function TestPrometheus:testCustomLatencyBucketer1()
   local p = prometheus.init("metrics", {latency={1,2,3}})
@@ -112,6 +147,7 @@ function TestPrometheus:testCustomLatencyBucketer1()
   assertEquals(self.dict:get('l1_bucket{var="ok",le="Inf"}'), 2)
   assertEquals(self.dict:get('l1_count{var="ok"}'), 2)
   assertEquals(self.dict:get('l1_sum{var="ok"}'), 2.151)
+  assertEquals(ngx.logs, nil)
 end
 function TestPrometheus:testCustomLatencyBucketer2()
   local p = prometheus.init("metrics", {latency={0.000005,5,50000}})
@@ -126,6 +162,7 @@ function TestPrometheus:testCustomLatencyBucketer2()
   assertEquals(self.dict:get('l1_bucket{var="ok",le="Inf"}'), 4)
   assertEquals(self.dict:get('l1_count{var="ok"}'), 4)
   assertEquals(self.dict:get('l1_sum{var="ok"}'), 70010.000001)
+  assertEquals(ngx.logs, nil)
 end
 function TestPrometheus:testCustomAdditionalBucketer()
   local p = prometheus.init("metrics", {bytes={100, 2000}})
@@ -150,6 +187,7 @@ function TestPrometheus:testCustomAdditionalBucketer()
   assertEquals(self.dict:get('b1_bucket{var="ok",le="Inf"}'), 4)
   assertEquals(self.dict:get('b1_count{var="ok"}'), 4)
   assertEquals(self.dict:get('b1_sum{var="ok"}'), 5250)
+  assertEquals(ngx.logs, nil)
 end
 function TestPrometheus:testCollect()
   local p = prometheus.init("metrics", {bytes={100, 2000}})
@@ -180,6 +218,7 @@ function TestPrometheus:testCollect()
   assert (type_idx ~= nil)
   assert (ngx.said[type_idx-1]:find("^l1") == nil)
   assert (ngx.said[type_idx+1]:find("^l1") ~= nil)
+  assertEquals(ngx.logs, nil)
 end
 
 os.exit(luaunit.run())

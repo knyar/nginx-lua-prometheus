@@ -124,6 +124,18 @@ log_by_lua 'prometheus:histogram_observe("nginx_http_response_size_bytes", nil,
   tonumber(ngx.var.bytes_sent), "bytes")';
 ```
 
+## Development
+
+### Install dependencies for testing
+
+- `luarocks install luacheck`
+- `luarocks install luaunit`
+
+### Run tests
+
+- `luacheck --globals ngx -- prometheus.lua`
+- `lua prometheus_test.lua`
+
 ## License
 
 Licensed under MIT license.

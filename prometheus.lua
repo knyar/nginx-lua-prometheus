@@ -24,8 +24,9 @@ local function metric_name(name, labels)
 
   -- "le" label should be the last one to ensure that all buckets for a given
   -- metric are exposed together when all metrics get sorted.
-  function _label_sort(one, two)
+  local function _label_sort(one, two)
     if two == "le" then return true end
+    if one == "le" then return false end
     return one < two
   end
   table.sort(keys, _label_sort)
@@ -44,15 +45,10 @@ local function bucket_format(bucket_types)
     local max_precision = 1
     for _, bucket in ipairs(buckets) do
       assert(type(bucket) == "number", "bucket limits should be numbers")
-      local as_string = tostring(bucket)
+      local as_string = string.format("%f", bucket):gsub("0*$", "")
       local dot_idx = as_string:find(".", 1, true)
-      if dot_idx then
-        max_order = math.max(max_order, dot_idx - 1)
-        max_precision = math.max(max_precision, as_string:len() - dot_idx)
-      else
-        -- this is just an integer
-        max_order = math.max(max_order, as_string:len())
-      end
+      max_order = math.max(max_order, dot_idx - 1)
+      max_precision = math.max(max_precision, as_string:len() - dot_idx)
     end
     bucket_formats[bucket_type] = "%0" .. (max_order + max_precision + 1) ..
       "." .. max_precision .. "f"
@@ -101,12 +97,12 @@ function Prometheus:set(key, value)
 end
 
 function Prometheus:incr(name, labels, value)
+  local key = metric_name(name, labels)
   if value < 0 then
     self:log_error_kv(key, value, "Value should not be negative")
     return
   end
 
-  local key = metric_name(name, labels)
   local newval, err = self.dict:incr(key, value)
   if newval then
     return
@@ -120,9 +116,9 @@ function Prometheus:incr(name, labels, value)
 end
 
 function Prometheus:histogram_observe(name, labels, value, bucket_type)
-  local bucket_type = bucket_type or "latency"
+  bucket_type = bucket_type or "latency"
   if labels and labels["le"] then
-    self:log_error_kv(key, value, "'le' is not a valid label name")
+    self:log_error_kv(name, value, "'le' is not a valid label name")
     return
   end
 

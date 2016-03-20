@@ -1,4 +1,38 @@
 -- vim: ts=2:sw=2:sts=2:expandtab
+--
+-- This module uses a single dictionary shared between Nginx workers to keep
+-- all metrics. Each counter is stored as a separate entry in that dictionary,
+-- which allows us to increment them using built-in `incr` method.
+--
+-- Prometheus requires that (a) all samples for a given metric are presented
+-- as one uninterrupted group, and (b) buckets of a histogram appear in
+-- increasing numerical order. We satisfy that by carefully constructing full
+-- metric names (i.e. metric name along with all labels) so that they meet
+-- those requirements while simply sorted alphabetically. In particular:
+--
+--  * all labels for a given metric are sorted by their keys, except for the
+--    "le" label which always goes last;
+--  * bucket boundaries (which are exposed as values of the "le" label) are
+--    presented as floating point numbers with leading and trailing zeroes. The
+--    amount of zeroes is detected for each bucketer automatically based on
+--    bucket boundaries;
+--  * internally "+Inf" bucket is stored as "Inf" (to make it appear after
+--    all numeric buckets), and gets replaced by "+Inf" just before we
+--    expose the metrics.
+--
+-- For example, if you define your bucket boundaries as {0.00005, 10, 1000}
+-- then we will keep the following samples for a metric `m1` with label
+-- `site` set to `site1`:
+--
+--   m1_bucket{site="site1",le="0000.00005"}
+--   m1_bucket{site="site1",le="0010.00000"}
+--   m1_bucket{site="site1",le="1000.00000"}
+--   m1_bucket{site="site1",le="Inf"}
+--   m1_count{site="site1"}
+--   m1_sum{site="site1"}
+--
+-- "Inf" will be replaced by "+Inf" while publishing metrics.
+
 local Prometheus = {}
 Prometheus.__index = Prometheus
 Prometheus.initialized = false
@@ -8,17 +42,19 @@ Prometheus.initialized = false
 -- To make metric names consistent, labels are sorted in alphabetical order
 -- (with the exception of "le" label which always goes last).
 --
---   metric_name("omg", {foo="one", bar="two"}) => 'omg{bar="two",foo="one"}'
+-- full_metric_name("omg", {foo="one", bar="two"}) => 'omg{bar="two",foo="one"}'
 --
 -- Args:
 --   name: string
 --   labels: table, mapping label keys to their values
 -- Returns:
 --   (string) full metric name.
-local function metric_name(name, labels)
+local function full_metric_name(name, labels)
   if not labels then
     return name
   end
+
+  -- create a separate array for all keys so that we could sort them.
   local keys = {}
   for key in pairs(labels) do table.insert(keys, key) end
 
@@ -38,24 +74,40 @@ local function metric_name(name, labels)
   return name .. "{" .. table.concat(label_parts, ",") .. "}"
 end
 
-local function bucket_format(bucket_types)
+-- Construct bucket format for a list of buckets.
+--
+-- This receives a table mapping bucketer type to a list of buckets and returns
+-- a sprintf template that should be used for bucket boundaries of each
+-- bucketer to make them come in increasing order when sorted alphabetically.
+--
+-- To re-phrase, this is where we detect how many leading and trailing zeros we
+-- need.
+--
+-- Args:
+--   bucketers: a table mapping bucketer name to a list of buckets
+--
+-- Returns:
+--   a table mapping bucketer name to a sprintf template.
+local function construct_bucket_format(bucketers)
   local bucket_formats = {}
-  for bucket_type, buckets in pairs(bucket_types) do
+  for bucketer, buckets in pairs(bucketers) do
     local max_order = 1
     local max_precision = 1
     for _, bucket in ipairs(buckets) do
-      assert(type(bucket) == "number", "bucket limits should be numbers")
+      assert(type(bucket) == "number", "bucket boundaries should be numeric")
+      -- floating point number with all trailing zeros removed
       local as_string = string.format("%f", bucket):gsub("0*$", "")
       local dot_idx = as_string:find(".", 1, true)
       max_order = math.max(max_order, dot_idx - 1)
       max_precision = math.max(max_precision, as_string:len() - dot_idx)
     end
-    bucket_formats[bucket_type] = "%0" .. (max_order + max_precision + 1) ..
+    bucket_formats[bucketer] = "%0" .. (max_order + max_precision + 1) ..
       "." .. max_precision .. "f"
   end
   return bucket_formats
 end
 
+-- Merges table `another` into `table`.
 local function extend_table(table, another)
   if another then
     for k, v in pairs(another) do table[k] = v end
@@ -63,17 +115,30 @@ local function extend_table(table, another)
   return table
 end
 
-function Prometheus.init(dict_name, buckets)
+-- Initialize the module.
+--
+-- This should be called once from the `init_by_lua` section in nginx
+-- configuration.
+--
+-- Args:
+--   dict_name: (string) name of the nginx shared dictionary which will be
+--     used to store all metrics
+--   bucketers: (table) a map from bucketer name to a list of bucket
+--     boundaries.
+--
+-- Returns:
+--   an object that should be used to measure and collect the metrics.
+function Prometheus.init(dict_name, bucketers)
   local self = setmetatable({}, Prometheus)
   self.dict = ngx.shared[dict_name or "prometheus_metrics"]
   self.initialized = true
 
   -- Default set of latency buckets, 5ms to 10s:
-  self.buckets = extend_table({
-    latency = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3, 0.4, 0.5,
-               0.75, 1, 1.5, 2, 3, 4, 5, 10}
-  }, buckets)
-  self.bucket_format = bucket_format(self.buckets)
+  self.bucketers = extend_table({
+    latency={0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3, 0.4, 0.5,
+             0.75, 1, 1.5, 2, 3, 4, 5, 10}
+  }, bucketers)
+  self.bucket_format = construct_bucket_format(self.bucketers)
 
   self.dict:set("nginx_metric_errors_total", 0)
   return self
@@ -89,6 +154,8 @@ function Prometheus:log_error_kv(key, value, err)
     "Error while setting '", key, "' to '", value, "': '", err, "'")
 end
 
+-- Set a given value into the dictionary key. This over-writes any existing
+-- values, so we use it only to initialize metrics.
 function Prometheus:set(key, value)
   local ok, err = self.dict:safe_set(key, value)
   if not ok then
@@ -96,8 +163,14 @@ function Prometheus:set(key, value)
   end
 end
 
+-- Increment a given metric by `value`.
+--
+-- Args:
+--   name: (string) short metric name without any labels.
+--   labels: (table) a table mapping label keys to values.
+--   value: (number) value to add.
 function Prometheus:incr(name, labels, value)
-  local key = metric_name(name, labels)
+  local key = full_metric_name(name, labels)
   if value < 0 then
     self:log_error_kv(key, value, "Value should not be negative")
     return
@@ -107,6 +180,10 @@ function Prometheus:incr(name, labels, value)
   if newval then
     return
   end
+  -- Yes, this looks like a race, so I guess we might under-report some values
+  -- when multiple workers simultaneously try to create the same metric.
+  -- Hopefully this does not happen too often (shared dictionary does not get
+  -- reset during configuation reload).
   if err == "not found" then
     self:set(key, value)
     return
@@ -115,17 +192,29 @@ function Prometheus:incr(name, labels, value)
   self:log_error_kv(key, value, err)
 end
 
-function Prometheus:histogram_observe(name, labels, value, bucket_type)
-  bucket_type = bucket_type or "latency"
+-- Record a given value into a histogram metric.
+--
+-- Args:
+--   name: (string) short metric name without any labels.
+--   labels: (table) a table mapping label keys to values.
+--   value: (number) value to observe.
+--   bucketer: (string) name of a bucketer to use. Default latency bucketer
+--     will be used if unspecified.
+function Prometheus:histogram_observe(name, labels, value, bucketer)
+  bucketer = bucketer or "latency"
   if labels and labels["le"] then
     self:log_error_kv(name, value, "'le' is not a valid label name")
     return
   end
+  if self.bucketers[bucketer] == nil then
+    self:log_error_kv(name, value, bucketer .. " is not a valid bucketer")
+    return
+  end
 
-  for _, bucket in ipairs(self.buckets[bucket_type]) do
+  for _, bucket in ipairs(self.bucketers[bucketer]) do
     if value <= bucket then
       local l = extend_table(
-        {le=self.bucket_format[bucket_type]:format(bucket)}, labels)
+        {le=self.bucket_format[bucketer]:format(bucket)}, labels)
       self:incr(name .. "_bucket", l, 1)
     end
   end
@@ -140,6 +229,9 @@ function Prometheus:histogram_observe(name, labels, value, bucket_type)
   self:incr(name .. "_sum", labels, value)
 end
 
+-- Provide some default measurements.
+-- Args:
+--   labels: (table) a table mapping label keys to values. Optional.
 function Prometheus:measure(labels)
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")
@@ -153,16 +245,28 @@ function Prometheus:measure(labels)
     ngx.now() - ngx.req.start_time())
 end
 
+-- Present all metrics in a text format compatible with Prometheus.
+--
+-- This function should be used to expose the metrics on a separate HTTP page.
+-- It will get the metrics from the dictionary, sort them, and provide TYPE
+-- declarations for all histograms.
 function Prometheus:collect()
+  if not self.initialized then
+    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
+    return
+  end
+
   local keys = self.dict:get_keys(0)
   -- Prometheus server expects buckets of a histogram to appear in increasing
   -- numerical order of their label values.
   table.sort(keys)
+
   local seen_histograms = {}
   for _, key in ipairs(keys) do
-    local value, flags = self.dict:get(key)
+    local value, err = self.dict:get(key)
     if value then
-      local bucket_suffix , _ = key:find("_bucket{")
+      -- Check if this is one of the buckets of a histogram metric.
+      local bucket_suffix, _ = key:find("_bucket{")
       if bucket_suffix and key:find("le=") then
         -- Prometheus expects all histograms to have a type declaration.
         local short_key = key:sub(1, bucket_suffix - 1)
@@ -174,7 +278,7 @@ function Prometheus:collect()
       -- Replace "Inf" with "+Inf" in each metric's last bucket 'le' label.
       ngx.say(key:gsub('le="Inf"', 'le="+Inf"'), " ", value)
     else
-      self:log_error("Error getting '", key, "': ", flags)
+      self:log_error("Error getting '", key, "': ", err)
     end
   end
 end

@@ -37,34 +37,47 @@ local function metric_name(name, labels)
   return name .. "{" .. table.concat(label_parts, ",") .. "}"
 end
 
-local function bucket_format(buckets)
-  local max_order = 1
-  local max_precision = 1
-  for _, bucket in ipairs(buckets) do
-    assert(type(bucket) == "number", "bucket limits should be numbers")
-    local as_string = tostring(bucket)
-    local dot_idx = string.find(as_string, ".", 1, true)
-    if dot_idx then
-      max_order = math.max(max_order, dot_idx - 1)
-      max_precision = math.max(max_precision, string.len(as_string) - dot_idx)
-    else
-      -- this is just an integer
-      max_order = math.max(max_order, string.len(as_string))
+local function bucket_format(bucket_types)
+  local bucket_formats = {}
+  for bucket_type, buckets in pairs(bucket_types) do
+    local max_order = 1
+    local max_precision = 1
+    for _, bucket in ipairs(buckets) do
+      assert(type(bucket) == "number", "bucket limits should be numbers")
+      local as_string = tostring(bucket)
+      local dot_idx = as_string:find(".", 1, true)
+      if dot_idx then
+        max_order = math.max(max_order, dot_idx - 1)
+        max_precision = math.max(max_precision, as_string:len() - dot_idx)
+      else
+        -- this is just an integer
+        max_order = math.max(max_order, as_string:len())
+      end
     end
+    bucket_formats[bucket_type] = "%0" .. (max_order + max_precision + 1) ..
+      "." .. max_precision .. "f"
   end
-  return "%0" .. (max_order + max_precision + 1) .. "." .. max_precision .. "f"
+  return bucket_formats
 end
 
-function Prometheus.new(dict_name, latency_buckets)
+local function extend_table(table, another)
+  if another then
+    for k, v in pairs(another) do table[k] = v end
+  end
+  return table
+end
+
+function Prometheus.init(dict_name, buckets)
   local self = setmetatable({}, Prometheus)
   self.dict = ngx.shared[dict_name or "prometheus_metrics"]
   self.initialized = true
 
   -- Default set of latency buckets, 5ms to 10s:
-  self.latency_buckets = latency_buckets or {
-    0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75,
-    1, 1.5, 2, 3, 4, 5, 10}
-  self.latency_bucket_format = bucket_format(self.latency_buckets)
+  self.buckets = extend_table({
+    latency = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3, 0.4, 0.5,
+               0.75, 1, 1.5, 2, 3, 4, 5, 10}
+  }, buckets)
+  self.bucket_format = bucket_format(self.buckets)
 
   self.dict:set("nginx_metric_errors_total", 0)
   return self
@@ -87,12 +100,13 @@ function Prometheus:set(key, value)
   end
 end
 
-function Prometheus:incr(key, value)
+function Prometheus:incr(name, labels, value)
   if value < 0 then
     self:log_error_kv(key, value, "Value should not be negative")
     return
   end
 
+  local key = metric_name(name, labels)
   local newval, err = self.dict:incr(key, value)
   if newval then
     return
@@ -105,24 +119,18 @@ function Prometheus:incr(key, value)
   self:log_error_kv(key, value, err)
 end
 
-local function extend_table(table, another)
-  if another then
-    for k, v in pairs(another) do table[k] = v end
-  end
-  return table
-end
-
-function Prometheus:histogram_observe(name, labels, value)
+function Prometheus:histogram_observe(name, labels, value, bucket_type)
+  local bucket_type = bucket_type or "latency"
   if labels and labels["le"] then
     self:log_error_kv(key, value, "'le' is not a valid label name")
     return
   end
 
-  for _, bucket in ipairs(self.latency_buckets) do
+  for _, bucket in ipairs(self.buckets[bucket_type]) do
     if value <= bucket then
       local l = extend_table(
-        {le=string.format(self.latency_bucket_format, bucket)}, labels)
-      self:incr(metric_name(name .. "_bucket", l), 1)
+        {le=self.bucket_format[bucket_type]:format(bucket)}, labels)
+      self:incr(name .. "_bucket", l, 1)
     end
   end
   -- Last bucket. Note, that the label value is "Inf" rather than "+Inf"
@@ -130,10 +138,10 @@ function Prometheus:histogram_observe(name, labels, value)
   -- one when all metrics are lexicographically sorted. "Inf" will get replaced
   -- by "+Inf" in Prometheus:collect().
   local l = extend_table({le="Inf"}, labels)
-  self:incr(metric_name(name .. "_bucket", l), 1)
+  self:incr(name .. "_bucket", l, 1)
 
-  self:incr(metric_name(name .. "_count", labels), 1)
-  self:incr(metric_name(name .. "_sum", labels), value)
+  self:incr(name .. "_count", labels, 1)
+  self:incr(name .. "_sum", labels, value)
 end
 
 function Prometheus:measure(labels)
@@ -143,7 +151,7 @@ function Prometheus:measure(labels)
   end
 
   local labels_with_status = extend_table({status = ngx.var.status}, labels)
-  self:incr(metric_name("nginx_http_requests_total", labels_with_status), 1)
+  self:incr("nginx_http_requests_total", labels_with_status, 1)
 
   self:histogram_observe("nginx_http_request_duration_seconds", labels,
     ngx.now() - ngx.req.start_time())
@@ -154,9 +162,19 @@ function Prometheus:collect()
   -- Prometheus server expects buckets of a histogram to appear in increasing
   -- numerical order of their label values.
   table.sort(keys)
+  local seen_histograms = {}
   for _, key in ipairs(keys) do
     local value, flags = self.dict:get(key)
     if value then
+      local bucket_suffix , _ = key:find("_bucket{")
+      if bucket_suffix and key:find("le=") then
+        -- Prometheus expects all histograms to have a type declaration.
+        local short_key = key:sub(1, bucket_suffix - 1)
+        if not seen_histograms[short_key] then
+          ngx.say("# TYPE " .. short_key .. " histogram")
+          seen_histograms[short_key] = true
+        end
+      end
       -- Replace "Inf" with "+Inf" in each metric's last bucket 'le' label.
       ngx.say(key:gsub('le="Inf"', 'le="+Inf"'), " ", value)
     else

@@ -16,7 +16,7 @@ a separate file in `/etc/nginx/conf.d` is usually the right place for this:
 ```
 lua_shared_dict prometheus_metrics 10M;
 lua_package_path "/path/to/nginx_exporter/?.lua";
-init_by_lua 'prometheus = require("prometheus").new("prometheus_metrics")';
+init_by_lua 'prometheus = require("prometheus").init("prometheus_metrics")';
 ```
 
 This configures a shared dictionary for your metrics called
@@ -76,12 +76,52 @@ log_by_lua 'prometheus:measure({host=ngx.var.host:gsub("^www.", "")})';
 ### Latency buckets
 
 By default latency measurements get distributed into 20 latency buckets covering
-a range from 5ms to 10s. You can pass a numerical array as the second argument
-to `new()` to override that list of buckets. For example, to use 4 buckets only
-(less or equal to 50ms, 100ms, 500ms, or more than 500ms):
+a range from 5ms to 10s. You can override default latency bucket list using the
+second argument to `init()`, which accepts a table mapping bucketer name to an
+array of bucket boundaries. By default distributions use a bucketer called
+`latency`. For example, to use 4 buckets only (less or equal to 50ms, 100ms,
+500ms, or more than 500ms):
 
 ```
-init_by_lua 'prometheus = require("prometheus").new("dict", {0.05, 0.1, 0.5})';
+init_by_lua 'prometheus = require("prometheus").init(
+  "prometheus_metrics", {latency={0.05, 0.1, 0.5}})';
+```
+
+## Custom metrics
+
+You can track any other metric in the `log_by_lua` section. For example, to add
+a counter tracking total size of incoming requests:
+
+```
+log_by_lua 'prometheus:incr(
+  "nginx_http_request_size_bytes", nil,
+  tonumber(ngx.var.request_length))`;
+```
+
+You can use the second argument to provide metric labels:
+
+```
+log_by_lua 'prometheus:incr(
+  "nginx_http_request_size_bytes", {site="website1"},
+  tonumber(ngx.var.request_length))`;
+```
+
+### Distributions
+
+You can add custom distributions as well. For example, to keep track of
+response sizes, you would need to define a custom bucketer first (default
+latency bucketer is not suitable for byte sizes):
+
+```
+init_by_lua 'prometheus = require("prometheus").init("prometheus_metrics",
+  {bytes={10,100,1000,10000,100000,1000000}})';
+```
+
+Then you can use the new `bytes` bucketer in a distribution metric:
+
+```
+log_by_lua 'prometheus:histogram_observe("nginx_http_response_size_bytes", nil,
+  tonumber(ngx.var.bytes_sent), "bytes")';
 ```
 
 ## License

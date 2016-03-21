@@ -1,8 +1,8 @@
-# Nginx exporter for Prometheus
+# Prometheus metric library for Nginx
 
 This is a Lua module that can be used with Nginx to keep track of metrics and
 expose them on a separate web page that can be scraped by
-[prometheus](https://prometheus.io).
+[Prometheus](https://prometheus.io).
 
 ## Quick start guide
 
@@ -15,7 +15,7 @@ a separate file in `/etc/nginx/conf.d` is usually the right place for this:
 
 ```
 lua_shared_dict prometheus_metrics 10M;
-lua_package_path "/path/to/nginx_exporter/?.lua";
+lua_package_path "/path/to/nginx-lua-prometheus/?.lua";
 init_by_lua 'prometheus = require("prometheus").init("prometheus_metrics")';
 ```
 

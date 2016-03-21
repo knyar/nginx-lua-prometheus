@@ -93,7 +93,7 @@ You can track any other metric in the `log_by_lua` section. For example, to add
 a counter tracking total size of incoming requests:
 
 ```
-log_by_lua 'prometheus:incr(
+log_by_lua 'prometheus:inc(
   "nginx_http_request_size_bytes", nil,
   tonumber(ngx.var.request_length))`;
 ```
@@ -101,7 +101,7 @@ log_by_lua 'prometheus:incr(
 You can use the second argument to provide metric labels:
 
 ```
-log_by_lua 'prometheus:incr(
+log_by_lua 'prometheus:inc(
   "nginx_http_request_size_bytes", {site="website1"},
   tonumber(ngx.var.request_length))`;
 ```

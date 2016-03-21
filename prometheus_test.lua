@@ -66,15 +66,15 @@ function TestPrometheus:testInit()
 end
 function TestPrometheus:testErrorUnitialized()
   local p = prometheus
-  p:incr("m1", nil, 1)
+  p:inc("m1", nil, 1)
   p:histogram_observe("l1", nil, 0.35)
 
   assertEquals(table.getn(ngx.logs), 2)
 end
 function TestPrometheus:testErrorNoMemory()
   local p = prometheus.init("metrics")
-  p:incr("metric1", nil, 5)
-  p:incr("willnotfit", nil, 1)
+  p:inc("metric1", nil, 5)
+  p:inc("willnotfit", nil, 1)
 
   assertEquals(self.dict:get("metric1"), 5)
   assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
@@ -83,7 +83,7 @@ function TestPrometheus:testErrorNoMemory()
 end
 function TestPrometheus:testErrorNegativeValue()
   local p = prometheus.init("metrics")
-  p:incr("metric1", nil, -5)
+  p:inc("metric1", nil, -5)
 
   assertEquals(self.dict:get("metric1"), nil)
   assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
@@ -107,9 +107,9 @@ function TestPrometheus:testErrorInvalidBucketer()
 end
 function TestPrometheus:testCounters()
   local p = prometheus.init("metrics")
-  p:incr("metric1", nil, 5)
-  p:incr("metric2", {f2="v2", f1="v1"}, 2)
-  p:incr("metric2", {f2="v2", f1="v1"}, 2)
+  p:inc("metric1", nil, 5)
+  p:inc("metric2", {f2="v2", f1="v1"})
+  p:inc("metric2", {f2="v2", f1="v1"}, 3)
 
   assertEquals(self.dict:get("metric1"), 5)
   assertEquals(self.dict:get('metric2{f1="v1",f2="v2"}'), 4)
@@ -191,9 +191,9 @@ function TestPrometheus:testCustomAdditionalBucketer()
 end
 function TestPrometheus:testCollect()
   local p = prometheus.init("metrics", {bytes={100, 2000}})
-  p:incr("metric1", nil, 5)
-  p:incr("metric2", {f2="v2", f1="v1"}, 2)
-  p:incr("metric2", {f2="v2", f1="v1"}, 2)
+  p:inc("metric1", nil, 5)
+  p:inc("metric2", {f2="v2", f1="v1"}, 2)
+  p:inc("metric2", {f2="v2", f1="v1"}, 2)
   p:histogram_observe("l1", {var="ok"}, 0.000001)
   p:histogram_observe("l1", {var="ok"}, 3)
   p:histogram_observe("l1", {var="ok"}, 7)

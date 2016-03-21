@@ -163,19 +163,20 @@ function Prometheus:set(key, value)
   end
 end
 
--- Increment a given metric by `value`.
+-- Increment a given counter by `value`.
 --
 -- Args:
 --   name: (string) short metric name without any labels.
 --   labels: (table) a table mapping label keys to values.
---   value: (number) value to add.
-function Prometheus:incr(name, labels, value)
+--   value: (number) value to add. Optional, defaults to 1.
+function Prometheus:inc(name, labels, value)
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")
     return
   end
 
   local key = full_metric_name(name, labels)
+  if value == nil then value = 1 end
   if value < 0 then
     self:log_error_kv(key, value, "Value should not be negative")
     return
@@ -226,7 +227,7 @@ function Prometheus:histogram_observe(name, labels, value, bucketer)
     if value <= bucket then
       local l = extend_table(
         {le=self.bucket_format[bucketer]:format(bucket)}, labels)
-      self:incr(name .. "_bucket", l, 1)
+      self:inc(name .. "_bucket", l, 1)
     end
   end
   -- Last bucket. Note, that the label value is "Inf" rather than "+Inf"
@@ -234,10 +235,10 @@ function Prometheus:histogram_observe(name, labels, value, bucketer)
   -- one when all metrics are lexicographically sorted. "Inf" will get replaced
   -- by "+Inf" in Prometheus:collect().
   local l = extend_table({le="Inf"}, labels)
-  self:incr(name .. "_bucket", l, 1)
+  self:inc(name .. "_bucket", l, 1)
 
-  self:incr(name .. "_count", labels, 1)
-  self:incr(name .. "_sum", labels, value)
+  self:inc(name .. "_count", labels, 1)
+  self:inc(name .. "_sum", labels, value)
 end
 
 -- Provide some default measurements.
@@ -245,7 +246,7 @@ end
 --   labels: (table) a table mapping label keys to values. Optional.
 function Prometheus:measure(labels)
   local labels_with_status = extend_table({status = ngx.var.status}, labels)
-  self:incr("nginx_http_requests_total", labels_with_status, 1)
+  self:inc("nginx_http_requests_total", labels_with_status, 1)
 
   self:histogram_observe("nginx_http_request_duration_seconds", labels,
     ngx.now() - ngx.req.start_time())

@@ -33,6 +33,93 @@
 --
 -- "Inf" will be replaced by "+Inf" while publishing metrics.
 
+-- Default set of latency buckets, 5ms to 10s:
+local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
+                         0.4, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5, 10}
+
+-- Metric is a "parent class" for all metrics.
+local Metric = {}
+function Metric:new(o)
+  o = o or {}
+  setmetatable(o, self)
+  self.__index = self
+  return o
+end
+
+-- Construct a table of labels based on label values.
+--
+-- This combines passed label values with label keys that were defined during
+-- creation of the metric.
+--
+-- Args:
+--   label_values: an array of label values.
+--
+-- Returns:
+--   a table of label key/value pairs
+function Metric:label_table(label_values)
+  if self.label_names == nil and label_values ~= nil then
+    return nil, "Expected no labels for " .. self.name .. ", got " ..
+                #label_values
+  elseif label_values == nil and self.label_names ~= nil then
+    return nil, "Expected " .. #self.label_names .. " labels for " ..
+                self.name .. ", got none"
+  elseif #self.label_names ~= #label_values then
+    return nil, "Wrong number of labels for " .. self.name .. ". Expected " ..
+                #self.label_names .. ", got " .. #label_values
+  end
+  local labels = {}
+  for i, label_key in ipairs(self.label_names) do
+    labels[label_key] = label_values[i]
+  end
+  return labels, nil
+end
+
+local Counter = Metric:new()
+-- Increase a given counter by `value`
+--
+-- Args:
+--   value: (number) a value to add to the counter. Defaults to 1 if skipped.
+--   label_values: an array of label values. Can be nil (i.e. not defined) for
+--     metrics that have no labels.
+function Counter:inc(value, label_values)
+  -- fast path for metrics with no labels
+  if self.label_names == nil and label_values == nil then
+    self.prometheus:inc(self.name, nil, value or 1)
+    return
+  end
+  local labels, err = self:label_table(label_values)
+  if err ~= nil then
+    self.prometheus:log_error(err)
+    return
+  end
+  self.prometheus:inc(self.name, labels, value or 1)
+end
+
+local Histogram = Metric:new()
+-- Record a given value in a histogram.
+--
+-- Args:
+--   value: (number) a value to record. Should be defined.
+--   label_values: an array of label values. Can be nil (i.e. not defined) for
+--     metrics that have no labels.
+function Histogram:observe(value, label_values)
+  if value == nil then
+    self.prometheus:log_error("No value passed for " .. self.name)
+    return
+  end
+  -- fast path for metrics with no labels
+  if self.label_names == nil and label_values == nil then
+    self.prometheus:histogram_observe(self.name, nil, value)
+    return
+  end
+  local labels, err = self:label_table(label_values)
+  if err ~= nil then
+    self.prometheus:log_error(err)
+    return
+  end
+  self.prometheus:histogram_observe(self.name, labels, value)
+end
+
 local Prometheus = {}
 Prometheus.__index = Prometheus
 Prometheus.initialized = false
@@ -59,7 +146,8 @@ local function full_metric_name(name, labels)
   for key in pairs(labels) do table.insert(keys, key) end
 
   -- "le" label should be the last one to ensure that all buckets for a given
-  -- metric are exposed together when all metrics get sorted.
+  -- metric are exposed together when all metrics get sorted. This is not
+  -- required by Prometheus, but makes the metrics list a bit nicer to look at.
   local function _label_sort(one, two)
     if two == "le" then return true end
     if one == "le" then return false end
@@ -88,26 +176,44 @@ end
 --
 -- Returns:
 --   a table mapping bucketer name to a sprintf template.
-local function construct_bucket_format(bucketers)
-  local bucket_formats = {}
-  for bucketer, buckets in pairs(bucketers) do
-    local max_order = 1
-    local max_precision = 1
-    for _, bucket in ipairs(buckets) do
-      assert(type(bucket) == "number", "bucket boundaries should be numeric")
-      -- floating point number with all trailing zeros removed
-      local as_string = string.format("%f", bucket):gsub("0*$", "")
-      local dot_idx = as_string:find(".", 1, true)
-      max_order = math.max(max_order, dot_idx - 1)
-      max_precision = math.max(max_precision, as_string:len() - dot_idx)
-    end
-    bucket_formats[bucketer] = "%0" .. (max_order + max_precision + 1) ..
-      "." .. max_precision .. "f"
+local function construct_bucket_format(buckets)
+  local max_order = 1
+  local max_precision = 1
+  for _, bucket in ipairs(buckets) do
+    assert(type(bucket) == "number", "bucket boundaries should be numeric")
+    -- floating point number with all trailing zeros removed
+    local as_string = string.format("%f", bucket):gsub("0*$", "")
+    local dot_idx = as_string:find(".", 1, true)
+    max_order = math.max(max_order, dot_idx - 1)
+    max_precision = math.max(max_precision, as_string:len() - dot_idx)
   end
-  return bucket_formats
+  return "%0" .. (max_order + max_precision + 1) .. "." .. max_precision .. "f"
 end
 
--- Merges table `another` into `table`.
+-- Extract short metric name from the full one
+--
+-- Args:
+--   full_name: (string) full metric name that can include labels
+--
+-- Returns:
+--   (string) short metric name with no labels. For a `*_bucket` metric of
+--     histogram the _bucket suffix will be removed.
+local function short_metric_name(full_name)
+  local labels_start, _ = full_name:find("{")
+  if not labels_start then
+    -- no labels
+    return full_name
+  end
+  local suffix_idx, _ = full_name:find("_bucket{")
+  if suffix_idx and full_name:find("le=") then
+    -- this is a histogram metric
+    return full_name:sub(1, suffix_idx - 1)
+  end
+  -- this is not a histogram metric
+  return full_name:sub(1, labels_start - 1)
+end
+
+-- Merge table `another` into `table`.
 local function extend_table(table, another)
   if another then
     for k, v in pairs(another) do table[k] = v end
@@ -123,23 +229,21 @@ end
 -- Args:
 --   dict_name: (string) name of the nginx shared dictionary which will be
 --     used to store all metrics
---   bucketers: (table) a map from bucketer name to a list of bucket
---     boundaries.
 --
 -- Returns:
 --   an object that should be used to measure and collect the metrics.
-function Prometheus.init(dict_name, bucketers)
+function Prometheus.init(dict_name)
   local self = setmetatable({}, Prometheus)
   self.dict = ngx.shared[dict_name or "prometheus_metrics"]
+  self.help = {}
+  self.type = {}
+  self.registered = {}
+  self.buckets = {}
+  self.bucket_format = {}
   self.initialized = true
 
-  -- Default set of latency buckets, 5ms to 10s:
-  self.bucketers = extend_table({
-    latency={0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3, 0.4, 0.5,
-             0.75, 1, 1.5, 2, 3, 4, 5, 10}
-  }, bucketers)
-  self.bucket_format = construct_bucket_format(self.bucketers)
-
+  self:counter("nginx_metric_errors_total",
+    "Number of nginx-lua-prometheus errors")
   self.dict:set("nginx_metric_errors_total", 0)
   return self
 end
@@ -152,6 +256,73 @@ end
 function Prometheus:log_error_kv(key, value, err)
   self:log_error(
     "Error while setting '", key, "' to '", value, "': '", err, "'")
+end
+
+-- Register a counter.
+--
+-- Args:
+--   name: (string) name of the metric. Required.
+--   description: (string) description of the metric. Will be used for the HELP
+--     comment on the metrics page. Optional.
+--   label_names: array of strings, defining a list of metrics. Optional.
+--
+-- Returns:
+--   a Counter object.
+function Prometheus:counter(name, description, label_names)
+  if not self.initialized then
+    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
+    return
+  end
+
+  if self.registered[name] then
+    self:log_error("Duplicate metric " .. name)
+    return
+  end
+  self.registered[name] = true
+  self.help[name] = description
+  self.type[name] = "counter"
+
+  return Counter:new{name=name, label_names=label_names, prometheus=self}
+end
+
+-- Register a histogram.
+--
+-- Args:
+--   name: (string) name of the metric. Required.
+--   description: (string) description of the metric. Will be used for the HELP
+--     comment on the metrics page. Optional.
+--   label_names: array of strings, defining a list of metrics. Optional.
+--   buckets: array if numbers, defining bucket boundaries. Optional.
+--
+-- Returns:
+--   a Counter object.
+function Prometheus:histogram(name, description, label_names, buckets)
+  if not self.initialized then
+    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
+    return
+  end
+
+  for _, label_name in ipairs(label_names or {}) do
+    if label_name == "le" then
+      self:log_error("Invalid label name 'le' in " .. name)
+      return
+    end
+  end
+
+  for _, suffix in ipairs({"", "_bucket", "_count", "_sum"}) do
+    if self.registered[name .. suffix] then
+      self:log_error("Duplicate metric " .. name .. suffix)
+      return
+    end
+    self.registered[name .. suffix] = true
+  end
+  self.help[name] = description
+  self.type[name] = "histogram"
+
+  self.buckets[name] = buckets or DEFAULT_BUCKETS
+  self.bucket_format[name] = construct_bucket_format(self.buckets[name])
+
+  return Histogram:new{name=name, label_names=label_names, prometheus=self}
 end
 
 -- Set a given dictionary key.
@@ -170,11 +341,6 @@ end
 --   labels: (table) a table mapping label keys to values.
 --   value: (number) value to add. Optional, defaults to 1.
 function Prometheus:inc(name, labels, value)
-  if not self.initialized then
-    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
-    return
-  end
-
   local key = full_metric_name(name, labels)
   if value == nil then value = 1 end
   if value < 0 then
@@ -206,27 +372,11 @@ end
 --   value: (number) value to observe.
 --   bucketer: (string) name of a bucketer to use. Default latency bucketer
 --     will be used if unspecified.
-function Prometheus:histogram_observe(name, labels, value, bucketer)
-  if not self.initialized then
-    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
-    return
-  end
-
-  if labels and labels["le"] then
-    self:log_error_kv(name, value, "'le' is not a valid label name")
-    return
-  end
-
-  bucketer = bucketer or "latency"
-  if self.bucketers[bucketer] == nil then
-    self:log_error_kv(name, value, bucketer .. " is not a valid bucketer")
-    return
-  end
-
-  for _, bucket in ipairs(self.bucketers[bucketer]) do
+function Prometheus:histogram_observe(name, labels, value)
+  for _, bucket in ipairs(self.buckets[name]) do
     if value <= bucket then
       local l = extend_table(
-        {le=self.bucket_format[bucketer]:format(bucket)}, labels)
+        {le=self.bucket_format[name]:format(bucket)}, labels)
       self:inc(name .. "_bucket", l, 1)
     end
   end
@@ -239,17 +389,6 @@ function Prometheus:histogram_observe(name, labels, value, bucketer)
 
   self:inc(name .. "_count", labels, 1)
   self:inc(name .. "_sum", labels, value)
-end
-
--- Provide some default measurements.
--- Args:
---   labels: (table) a table mapping label keys to values. Optional.
-function Prometheus:measure(labels)
-  local labels_with_status = extend_table({status = ngx.var.status}, labels)
-  self:inc("nginx_http_requests_total", labels_with_status, 1)
-
-  self:histogram_observe("nginx_http_request_duration_seconds", labels,
-    ngx.now() - ngx.req.start_time())
 end
 
 -- Present all metrics in a text format compatible with Prometheus.
@@ -268,19 +407,19 @@ function Prometheus:collect()
   -- numerical order of their label values.
   table.sort(keys)
 
-  local seen_histograms = {}
+  local seen_metrics = {}
   for _, key in ipairs(keys) do
     local value, err = self.dict:get(key)
     if value then
-      -- Check if this is one of the buckets of a histogram metric.
-      local bucket_suffix, _ = key:find("_bucket{")
-      if bucket_suffix and key:find("le=") then
-        -- Prometheus expects all histograms to have a type declaration.
-        local metric_name = key:sub(1, bucket_suffix - 1)
-        if not seen_histograms[metric_name] then
-          ngx.say("# TYPE " .. metric_name .. " histogram")
-          seen_histograms[metric_name] = true
+      local short_name = short_metric_name(key)
+      if not seen_metrics[short_name] then
+        if self.help[short_name] then
+          ngx.say("# HELP " .. short_name .. " " .. self.help[short_name])
         end
+        if self.type[short_name] then
+          ngx.say("# TYPE " .. short_name .. " " .. self.type[short_name])
+        end
+        seen_metrics[short_name] = true
       end
       -- Replace "Inf" with "+Inf" in each metric's last bucket 'le' label.
       ngx.say(key:gsub('le="Inf"', 'le="+Inf"'), " ", value)

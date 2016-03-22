@@ -162,20 +162,20 @@ local function full_metric_name(name, labels)
   return name .. "{" .. table.concat(label_parts, ",") .. "}"
 end
 
--- Construct bucket format for a list of bucketers.
+-- Construct bucket format for a list of buckets.
 --
--- This receives a table mapping bucketer name to a list of buckets and returns
--- a sprintf template that should be used for bucket boundaries of each
--- bucketer to make them come in increasing order when sorted alphabetically.
+-- This receives a list of buckets and returns a sprintf template that should
+-- be used for bucket boundaries to make them come in increasing order when
+-- sorted alphabetically.
 --
 -- To re-phrase, this is where we detect how many leading and trailing zeros we
 -- need.
 --
 -- Args:
---   bucketers: a table mapping bucketer name to a list of buckets
+--   buckets: a list of buckets
 --
 -- Returns:
---   a table mapping bucketer name to a sprintf template.
+--   (string) a sprintf template.
 local function construct_bucket_format(buckets)
   local max_order = 1
   local max_precision = 1
@@ -190,10 +190,10 @@ local function construct_bucket_format(buckets)
   return "%0" .. (max_order + max_precision + 1) .. "." .. max_precision .. "f"
 end
 
--- Extract short metric name from the full one
+-- Extract short metric name from the full one.
 --
 -- Args:
---   full_name: (string) full metric name that can include labels
+--   full_name: (string) full metric name that can include labels.
 --
 -- Returns:
 --   (string) short metric name with no labels. For a `*_bucket` metric of
@@ -231,7 +231,7 @@ end
 --     used to store all metrics
 --
 -- Returns:
---   an object that should be used to measure and collect the metrics.
+--   an object that should be used to register metrics.
 function Prometheus.init(dict_name)
   local self = setmetatable({}, Prometheus)
   self.dict = ngx.shared[dict_name or "prometheus_metrics"]
@@ -370,8 +370,6 @@ end
 --   name: (string) short metric name without any labels.
 --   labels: (table) a table mapping label keys to values.
 --   value: (number) value to observe.
---   bucketer: (string) name of a bucketer to use. Default latency bucketer
---     will be used if unspecified.
 function Prometheus:histogram_observe(name, labels, value)
   for _, bucket in ipairs(self.buckets[name]) do
     if value <= bucket then
@@ -394,8 +392,8 @@ end
 -- Present all metrics in a text format compatible with Prometheus.
 --
 -- This function should be used to expose the metrics on a separate HTTP page.
--- It will get the metrics from the dictionary, sort them, and provide TYPE
--- declarations for all histograms.
+-- It will get the metrics from the dictionary, sort them, and expose them
+-- aling with TYPE and HELP comments.
 function Prometheus:collect()
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")

@@ -59,6 +59,147 @@ Metrics will be available at `http://your.nginx:9145/metrics`.
 
 ## API reference
 
+### init()
+
+**syntax:** require("prometheus").init(*dict_name*)
+
+Initializes the module. This should be called once from the
+[init_by_lua](https://github.com/openresty/lua-nginx-module#init_by_lua)
+section in nginx configuration.
+
+* `dict_name` is the name of the nginx shared dictionary which will be used to
+  store all metrics. Defaults to `prometheus_metrics` if not specified.
+
+Returns a `prometheus` object that should be used to register metrics.
+
+Example:
+```
+init_by_lua '
+  prometheus = require("prometheus").init("prometheus_metrics")
+';
+```
+
+### prometheus:counter()
+
+**syntax:** prometheus:counter(*name*, *description*, *label_names*)
+
+Registers a counter. Should be called once from the
+[init_by_lua](https://github.com/openresty/lua-nginx-module#init_by_lua)
+section.
+
+* `name` is the name of the metric.
+* `description` is the text description that will be presented to Prometheus
+  along with the metric. Optional (pass `nil` if you still need to define
+  label names).
+* `label_names` is an array of label names for the metric. Optional.
+
+[Naming section](https://prometheus.io/docs/practices/naming/) of Prometheus
+documentation provides good guidelines on choosing metric and label names.
+
+Returns a `counter` object that can later be incremented.
+
+Example:
+```
+init_by_lua '
+  prometheus = require("prometheus").init("prometheus_metrics")
+  metric_bytes = prometheus:counter(
+    "nginx_http_request_size_bytes", "Total size of incoming requests")
+  metric_requests = prometheus:counter(
+    "nginx_http_requests_total", "Number of HTTP requests", {"host", "status"})
+';
+```
+
+### prometheus:histogram()
+
+**syntax:** prometheus:histogram(*name*, *description*, *label_names*,
+  *buckets*)
+
+Registers a histogram. Should be called once from the
+[init_by_lua](https://github.com/openresty/lua-nginx-module#init_by_lua)
+section.
+
+* `name` is the name of the metric.
+* `description` is the text description. Optional.
+* `label_names` is an array of label names for the metric. Optional.
+* `buckets` is an array of numbers defining bucket boundaries. Optional,
+  defaults to 20 latency buckets covering a range from 5ms to 10s (in seconds).
+
+Returns a `histogram` object that can later be used to record samples.
+
+Example:
+```
+init_by_lua '
+  prometheus = require("prometheus").init("prometheus_metrics")
+  metric_latency = prometheus:histogram(
+    "nginx_http_request_duration_seconds", "HTTP request latency", {"host"})
+  metric_response_sizes = prometheus:counter(
+    "nginx_http_response_size_bytes", "Size of HTTP responses", nil,
+    {10,100,1000,10000,100000,1000000})
+';
+```
+
+### prometheus:collect()
+
+**syntax:** prometheus:collect()
+
+Presents all metrics in a text format compatible with Prometheus. This should be
+called in
+[content_by_lua](https://github.com/openresty/lua-nginx-module#content_by_lua)
+to expose the metrics on a separate HTTP page.
+
+Example:
+```
+location /metrics {
+  content_by_lua 'prometheus:collect()';
+  allow 192.168.0.0/16;
+  deny all;
+}
+```
+
+### counter:inc()
+
+**syntax:** counter:inc(*value*, *label_values*)
+
+Increments a previously defined counter. This is usually called from
+[log_by_lua](https://github.com/openresty/lua-nginx-module#log_by_lua)
+globally or per server/location.
+
+* `value` is a value that should be added to the counter. Defaults to 1.
+* `label_values` is an array of label values. The number of values should
+  match the number of label names defined when the counter was registered
+  using `prometheus:counter()`. No label values should be provided for
+  counters with no labels.
+
+Example:
+```
+log_by_lua '
+  metric_bytes:inc(tonumber(ngx.var.request_length))
+  metric_requests:inc(1, {ngx.var.host, ngx.var.status})
+';
+```
+
+### histogram:observe()
+
+**syntax:** histogram:observe(*value*, *label_values*)
+
+Records a value in a previously defined histogram. Usually called from
+[log_by_lua](https://github.com/openresty/lua-nginx-module#log_by_lua)
+globally or per server/location.
+
+* `value` is a value that should be recorded. Required.
+* `label_values` is an array of label values. The number of values should
+  match the number of label names defined when the histogram was registered
+  using `prometheus:histogram()`. No label values should be provided for
+  histograms with no labels.
+
+Example:
+```
+log_by_lua '
+  metric_latency:observe(ngx.now() - ngx.req.start_time(), {ngx.var.host})
+  metric_response_sizes:observe(tonumber(ngx.var.bytes_sent))
+';
+```
+
 ### Built-in metrics
 
 The module increments the `nginx_metric_errors_total` metric if it encounters

@@ -160,7 +160,7 @@ location /metrics {
 
 **syntax:** counter:inc(*value*, *label_values*)
 
-Increments a previously defined counter. This is usually called from
+Increments a previously registered counter. This is usually called from
 [log_by_lua](https://github.com/openresty/lua-nginx-module#log_by_lua)
 globally or per server/location.
 
@@ -182,7 +182,7 @@ log_by_lua '
 
 **syntax:** histogram:observe(*value*, *label_values*)
 
-Records a value in a previously defined histogram. Usually called from
+Records a value in a previously registered histogram. Usually called from
 [log_by_lua](https://github.com/openresty/lua-nginx-module#log_by_lua)
 globally or per server/location.
 

@@ -10,8 +10,9 @@
 -- metric names (i.e. metric name along with all labels) so that they meet
 -- those requirements while being sorted alphabetically. In particular:
 --
---  * all labels for a given metric are sorted by their keys, except for the
---    "le" label which always goes last;
+--  * all labels for a given metric are presented in reproducible order (the one
+--    used when labels were declared). "le" label for histogram metrics always
+--    goes last;
 --  * bucket boundaries (which are exposed as values of the "le" label) are
 --    presented as floating point numbers with leading and trailing zeroes.
 --    Number of of zeroes is determined for each bucketer automatically based on
@@ -51,32 +52,25 @@ function Metric:new(o)
   return o
 end
 
--- Construct a table of labels based on label values.
---
--- This combines passed label values with label keys that were defined during
--- creation of the metric.
+-- Checks that the right number of labels values have been passed.
 --
 -- Args:
 --   label_values: an array of label values.
 --
 -- Returns:
---   a table of label key/value pairs
-function Metric:label_table(label_values)
-  if self.label_names == nil and label_values ~= nil then
-    return nil, "Expected no labels for " .. self.name .. ", got " ..
-                #label_values
+--   an error message or nil
+function Metric:check_labels(label_values)
+  if self.label_names == nil and label_values == nil then
+    return
+  elseif self.label_names == nil and label_values ~= nil then
+    return "Expected no labels for " .. self.name .. ", got " ..  #label_values
   elseif label_values == nil and self.label_names ~= nil then
-    return nil, "Expected " .. #self.label_names .. " labels for " ..
-                self.name .. ", got none"
+    return "Expected " .. #self.label_names .. " labels for " ..
+           self.name .. ", got none"
   elseif #self.label_names ~= #label_values then
-    return nil, "Wrong number of labels for " .. self.name .. ". Expected " ..
-                #self.label_names .. ", got " .. #label_values
+    return "Wrong number of labels for " .. self.name .. ". Expected " ..
+           #self.label_names .. ", got " .. #label_values
   end
-  local labels = {}
-  for i, label_key in ipairs(self.label_names) do
-    labels[label_key] = label_values[i]
-  end
-  return labels, nil
 end
 
 local Counter = Metric:new()
@@ -87,17 +81,12 @@ local Counter = Metric:new()
 --   label_values: an array of label values. Can be nil (i.e. not defined) for
 --     metrics that have no labels.
 function Counter:inc(value, label_values)
-  -- fast path for metrics with no labels
-  if self.label_names == nil and label_values == nil then
-    self.prometheus:inc(self.name, nil, value or 1)
-    return
-  end
-  local labels, err = self:label_table(label_values)
+  local err = self:check_labels(label_values)
   if err ~= nil then
     self.prometheus:log_error(err)
     return
   end
-  self.prometheus:inc(self.name, labels, value or 1)
+  self.prometheus:inc(self.name, self.label_names, label_values, value or 1)
 end
 
 local Histogram = Metric:new()
@@ -112,17 +101,12 @@ function Histogram:observe(value, label_values)
     self.prometheus:log_error("No value passed for " .. self.name)
     return
   end
-  -- fast path for metrics with no labels
-  if self.label_names == nil and label_values == nil then
-    self.prometheus:histogram_observe(self.name, nil, value)
-    return
-  end
-  local labels, err = self:label_table(label_values)
+  local err = self:check_labels(label_values)
   if err ~= nil then
     self.prometheus:log_error(err)
     return
   end
-  self.prometheus:histogram_observe(self.name, labels, value)
+  self.prometheus:histogram_observe(self.name, self.label_names, label_values, value)
 end
 
 local Prometheus = {}
@@ -131,38 +115,19 @@ Prometheus.initialized = false
 
 -- Generate full metric name that includes all labels.
 --
--- To make metric names reproducible, labels are sorted in alphabetical order,
--- with the exception of "le" which always goes last.
---
--- full_metric_name("omg", {foo="one", bar="two"}) => 'omg{bar="two",foo="one"}'
---
 -- Args:
 --   name: string
---   labels: table, mapping label keys to their values
+--   label_names: (array) a list of label keys.
+--   label_values: (array) a list of label values.
 -- Returns:
 --   (string) full metric name.
-local function full_metric_name(name, labels)
-  if not labels then
+local function full_metric_name(name, label_names, label_values)
+  if not label_names then
     return name
   end
-
-  -- create a separate array for all keys so that we could sort them.
-  local keys = {}
-  for key in pairs(labels) do table.insert(keys, key) end
-
-  -- "le" label should be the last one to ensure that all buckets for a given
-  -- metric are exposed together when all metrics get sorted. This is not
-  -- required by Prometheus, but makes the metrics list a bit nicer to look at.
-  local function _label_sort(one, two)
-    if two == "le" then return true end
-    if one == "le" then return false end
-    return one < two
-  end
-  table.sort(keys, _label_sort)
-
   local label_parts = {}
-  for _, key in ipairs(keys) do
-    table.insert(label_parts, key .. '="' .. labels[key] .. '"')
+  for idx, key in ipairs(label_names) do
+    table.insert(label_parts, key .. '="' .. label_values[idx] .. '"')
   end
   return name .. "{" .. table.concat(label_parts, ",") .. "}"
 end
@@ -218,12 +183,15 @@ local function short_metric_name(full_name)
   return full_name:sub(1, labels_start - 1)
 end
 
--- Merge table `another` into `table`.
-local function extend_table(table, another)
-  if another then
-    for k, v in pairs(another) do table[k] = v end
+-- Makes a shallow copy of a table
+local function copy_table(table)
+  local new = {}
+  if table ~= nil then
+    for k, v in ipairs(table) do
+      new[k] = v
+    end
   end
-  return table
+  return new
 end
 
 -- Initialize the module.
@@ -343,10 +311,11 @@ end
 --
 -- Args:
 --   name: (string) short metric name without any labels.
---   labels: (table) a table mapping label keys to values.
+--   label_names: (array) a list of label keys.
+--   label_values: (array) a list of label values.
 --   value: (number) value to add. Optional, defaults to 1.
-function Prometheus:inc(name, labels, value)
-  local key = full_metric_name(name, labels)
+function Prometheus:inc(name, label_names, label_values, value)
+  local key = full_metric_name(name, label_names, label_values)
   if value == nil then value = 1 end
   if value < 0 then
     self:log_error_kv(key, value, "Value should not be negative")
@@ -373,25 +342,33 @@ end
 --
 -- Args:
 --   name: (string) short metric name without any labels.
---   labels: (table) a table mapping label keys to values.
+--   label_names: (array) a list of label keys.
+--   label_values: (array) a list of label values.
 --   value: (number) value to observe.
-function Prometheus:histogram_observe(name, labels, value)
-  for _, bucket in ipairs(self.buckets[name]) do
-    if value <= bucket then
-      local l = extend_table(
-        {le=self.bucket_format[name]:format(bucket)}, labels)
-      self:inc(name .. "_bucket", l, 1)
-    end
-  end
+function Prometheus:histogram_observe(name, label_names, label_values, value)
+  self:inc(name .. "_count", label_names, label_values, 1)
+  self:inc(name .. "_sum", label_names, label_values, value)
+
+  -- we are going to mutate arrays of label names and values, so create a copy.
+  local l_names = copy_table(label_names)
+  local l_values = copy_table(label_values)
+
   -- Last bucket. Note, that the label value is "Inf" rather than "+Inf"
   -- required by Prometheus. This is necessary for this bucket to be the last
   -- one when all metrics are lexicographically sorted. "Inf" will get replaced
   -- by "+Inf" in Prometheus:collect().
-  local l = extend_table({le="Inf"}, labels)
-  self:inc(name .. "_bucket", l, 1)
+  table.insert(l_names, "le")
+  table.insert(l_values, "Inf")
+  self:inc(name .. "_bucket", l_names, l_values, 1)
 
-  self:inc(name .. "_count", labels, 1)
-  self:inc(name .. "_sum", labels, value)
+  local label_count = #l_names
+  for _, bucket in ipairs(self.buckets[name]) do
+    if value <= bucket then
+      -- last label is now "le"
+      l_values[label_count] = self.bucket_format[name]:format(bucket)
+      self:inc(name .. "_bucket", l_names, l_values, 1)
+    end
+  end
 end
 
 -- Present all metrics in a text format compatible with Prometheus.

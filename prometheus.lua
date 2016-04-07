@@ -202,13 +202,20 @@ end
 -- Args:
 --   dict_name: (string) name of the nginx shared dictionary which will be
 --     used to store all metrics
+--   prefix: (optional string) if supplied, prefix is added to all 
+--   metric names on output
 --
 -- Returns:
 --   an object that should be used to register metrics.
-function Prometheus.init(dict_name)
+function Prometheus.init(dict_name, prefix)
   local self = setmetatable({}, Prometheus)
   self.dict = ngx.shared[dict_name or "prometheus_metrics"]
   self.help = {}
+  if prefix then
+    self.prefix = prefix
+  else
+    self.prefix = ''
+  end
   self.type = {}
   self.registered = {}
   self.buckets = {}
@@ -394,15 +401,15 @@ function Prometheus:collect()
       local short_name = short_metric_name(key)
       if not seen_metrics[short_name] then
         if self.help[short_name] then
-          ngx.say("# HELP " .. short_name .. " " .. self.help[short_name])
+          ngx.say("# HELP " .. self.prefix .. short_name .. " " .. self.help[short_name])
         end
         if self.type[short_name] then
-          ngx.say("# TYPE " .. short_name .. " " .. self.type[short_name])
+          ngx.say("# TYPE " .. self.prefix .. short_name .. " " .. self.type[short_name])
         end
         seen_metrics[short_name] = true
       end
       -- Replace "Inf" with "+Inf" in each metric's last bucket 'le' label.
-      ngx.say(key:gsub('le="Inf"', 'le="+Inf"'), " ", value)
+      ngx.say(self.prefix .. key:gsub('le="Inf"', 'le="+Inf"'), " ", value)
     else
       self:log_error("Error getting '", key, "': ", err)
     end

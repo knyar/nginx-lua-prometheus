@@ -61,7 +61,7 @@ Metrics will be available at `http://your.nginx:9145/metrics`.
 
 ### init()
 
-**syntax:** require("prometheus").init(*dict_name*)
+**syntax:** require("prometheus").init(*dict_name*, [*prefix*])
 
 Initializes the module. This should be called once from the
 [init_by_lua](https://github.com/openresty/lua-nginx-module#init_by_lua)
@@ -69,6 +69,8 @@ section in nginx configuration.
 
 * `dict_name` is the name of the nginx shared dictionary which will be used to
   store all metrics. Defaults to `prometheus_metrics` if not specified.
+* `prefix` is an optional string which will be prepended to metric names on output
+
 
 Returns a `prometheus` object that should be used to register metrics.
 

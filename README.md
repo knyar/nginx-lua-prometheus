@@ -57,6 +57,10 @@ server {
 
 Metrics will be available at `http://your.nginx:9145/metrics`.
 
+**Note**: using HTTP host as a metric label value on servers that have many
+virtual hosts has potential performance implications. Please read the caveats
+section below for more information.
+
 ## API reference
 
 ### init()
@@ -207,6 +211,21 @@ log_by_lua '
 The module increments the `nginx_metric_errors_total` metric if it encounters
 an error (for example, when `lua_shared_dict` becomes full). You might want
 to configure an alert on that metric.
+
+## Caveats
+
+Please keep in mind that all metrics stored by this library are kept in a
+single shared dictionary (`lua_shared_dict`). While exposing metrics the module
+has to list all dictionary keys, which has serious performance implications for
+dictionaries with large number of keys (in this case this means large number
+of metrics OR metrics with high label cardinality). Listing the keys has to
+lock the dictionary, which blocks all threads that try to access it (i.e.
+potentially all nginx worker threads).
+
+There is no elegant solution to this issue (besides keeping metrics in a
+separate storage system external to nginx), so for latency-critical servers you
+might want to keep the number of metrics (and distinct metric label values) to
+a minimum.
 
 ## Development
 

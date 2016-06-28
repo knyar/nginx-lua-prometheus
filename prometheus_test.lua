@@ -238,45 +238,24 @@ function TestPrometheus:testCollect()
 end
 
 function TestPrometheus:testCollectWithPrefix()
-
-  self.p = prometheus.init("metrics", "test_pref_")
-  local hist3 = self.p:histogram("b1", "Bytes", {"var"}, {100, 2000})
-  self.counter1:inc(5)
-  self.counter2:inc(2, {"v2", "v1"})
-  self.counter2:inc(2, {"v2", "v1"})
-  self.hist1:observe(0.000001)
-  self.hist2:observe(0.000001, {"ok", "site2"})
-  self.hist2:observe(3, {"ok", "site2"})
-  self.hist2:observe(7, {"ok", "site2"})
-  self.hist2:observe(70000, {"ok","site2"})
-  hist3:observe(50, {"ok"})
-  hist3:observe(50, {"ok"})
-  hist3:observe(150, {"ok"})
-  hist3:observe(5000, {"ok"})
-  self.p:collect()
+  local p = prometheus.init("metrics", "test_pref_")
+  local counter1 = p:counter("metric1", "Metric 1")
+  local hist1 = p:histogram("b1", "Bytes", {"var"}, {100, 2000})
+  counter1:inc(5)
+  hist1:observe(50, {"ok"})
+  hist1:observe(50, {"ok"})
+  hist1:observe(150, {"ok"})
+  hist1:observe(5000, {"ok"})
+  p:collect()
 
   assert(find_idx(ngx.said, "# HELP test_pref_metric1 Metric 1") ~= nil)
   assert(find_idx(ngx.said, "# TYPE test_pref_metric1 counter") ~= nil)
   assert(find_idx(ngx.said, "test_pref_metric1 5") ~= nil)
 
-  assert(find_idx(ngx.said, "# TYPE test_pref_metric2 counter") ~= nil)
-  assert(find_idx(ngx.said, 'test_pref_metric2{f2="v2",f1="v1"} 4') ~= nil)
-
   assert(find_idx(ngx.said, "# TYPE test_pref_b1 histogram") ~= nil)
   assert(find_idx(ngx.said, "# HELP test_pref_b1 Bytes") ~= nil)
   assert(find_idx(ngx.said, 'test_pref_b1_bucket{var="ok",le="0100.0"} 2') ~= nil)
   assert(find_idx(ngx.said, 'test_pref_b1_sum{var="ok"} 5250') ~= nil)
-
-  assert(find_idx(ngx.said, 'test_pref_l2_bucket{var="ok",site="site2",le="04.000"} 2') ~= nil)
-  assert(find_idx(ngx.said, 'test_pref_l2_bucket{var="ok",site="site2",le="+Inf"} 4') ~= nil)
-
-  -- check that type comment exists and is before any samples for the metric.
-  local type_idx = find_idx(ngx.said, '# TYPE l1 histogram')
-  assert (type_idx ~= nil)
-  assert (ngx.said[type_idx-1]:find("^l1") == nil)
-  assert (ngx.said[type_idx+1]:find("^l1") ~= nil)
-  assertEquals(ngx.logs, nil)
 end
-
 
 os.exit(luaunit.run())

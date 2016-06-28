@@ -127,7 +127,11 @@ local function full_metric_name(name, label_names, label_values)
   end
   local label_parts = {}
   for idx, key in ipairs(label_names) do
-    table.insert(label_parts, key .. '="' .. label_values[idx] .. '"')
+    local label_value = (string.format("%s", label_values[idx])
+      :gsub("\\", "\\\\")
+      :gsub("\n", "\\n")
+      :gsub('"', '\\"'))
+    table.insert(label_parts, key .. '="' .. label_value .. '"')
   end
   return name .. "{" .. table.concat(label_parts, ",") .. "}"
 end

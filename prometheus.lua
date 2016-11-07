@@ -388,6 +388,7 @@ end
 -- It will get the metrics from the dictionary, sort them, and expose them
 -- aling with TYPE and HELP comments.
 function Prometheus:collect()
+  ngx.header.content_type = "text/plain"
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")
     return

@@ -1,0 +1,33 @@
+# Stolen from https://github.com/daurnimator/luatz/blob/master/.travis.yml
+language: python
+
+sudo: false
+
+env:
+  matrix:
+    - LUA="lua 5.1"
+    - LUA="lua 5.2"
+    - LUA="lua 5.3"
+
+before_install:
+  - pip install hererocks
+  - hererocks here -r^ --$LUA # Install latest LuaRocks version
+                              # plus the Lua version for this build job
+                              # into 'here' subdirectory
+  - export PATH=$PATH:$PWD/here/bin # Add directory with all installed binaries to PATH
+  - eval `luarocks path --bin`
+  - luarocks install luacheck
+  - luarocks install luacov-coveralls
+  - luarocks install luaunit
+
+script:
+  - luacheck --globals ngx -- prometheus.lua
+  - lua -lluacov prometheus_test.lua
+
+after_success:
+  - luacov-coveralls --include %./prometheus.lua
+
+notifications:
+  email:
+    on_success: change
+    on_failure: always

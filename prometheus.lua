@@ -206,7 +206,7 @@ end
 -- Args:
 --   dict_name: (string) name of the nginx shared dictionary which will be
 --     used to store all metrics
---   prefix: (optional string) if supplied, prefix is added to all 
+--   prefix: (optional string) if supplied, prefix is added to all
 --   metric names on output
 --
 -- Returns:

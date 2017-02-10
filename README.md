@@ -141,7 +141,7 @@ init_by_lua '
   prometheus = require("prometheus").init("prometheus_metrics")
   metric_latency = prometheus:histogram(
     "nginx_http_request_duration_seconds", "HTTP request latency", {"host"})
-  metric_response_sizes = prometheus:counter(
+  metric_response_sizes = prometheus:histogram(
     "nginx_http_response_size_bytes", "Size of HTTP responses", nil,
     {10,100,1000,10000,100000,1000000})
 ';

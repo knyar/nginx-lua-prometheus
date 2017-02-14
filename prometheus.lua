@@ -70,6 +70,12 @@ function Metric:check_labels(label_values)
   elseif #self.label_names ~= #label_values then
     return "Wrong number of labels for " .. self.name .. ". Expected " ..
            #self.label_names .. ", got " .. #label_values
+  else
+    for i, k in ipairs(self.label_names) do
+      if label_values[i] == nil then
+        return "Unexpected nil value for label " .. k ..  " of " .. self.name
+      end
+    end
   end
 end
 
@@ -279,7 +285,7 @@ end
 --   buckets: array if numbers, defining bucket boundaries. Optional.
 --
 -- Returns:
---   a Counter object.
+--   a Histogram object.
 function Prometheus:histogram(name, description, label_names, buckets)
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")

@@ -365,7 +365,7 @@ end
 
 -- Set a given dictionary key.
 -- This overwrites existing values, so we use it only to initialize metrics.
-function Prometheus:set(key, value)
+function Prometheus:set_key(key, value)
   local ok, err = self.dict:safe_set(key, value)
   if not ok then
     self:log_error_kv(key, value, err)
@@ -396,7 +396,7 @@ function Prometheus:inc(name, label_names, label_values, value)
   -- Hopefully this does not happen too often (shared dictionary does not get
   -- reset during configuation reload).
   if err == "not found" then
-    self:set(key, value)
+    self:set_key(key, value)
     return
   end
   -- Unexpected error
@@ -421,7 +421,7 @@ function Prometheus:set_gauge(name, label_names, label_values, value)
   -- Hopefully this does not happen too often (shared dictionary does not get
   -- reset during configuation reload).
   if err == "not found" then
-    self:set(key, value)
+    self:set_key(key, value)
     return
   end
   -- Unexpected error

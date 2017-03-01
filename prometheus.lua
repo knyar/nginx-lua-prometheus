@@ -103,16 +103,16 @@ local Gauge = Metric:new()
 --   label_values: an array of label values. Can be nil (i.e. not defined) for
 --     metrics that have no labels.
 function Gauge:set(value, label_values)
-	if value == nil then
-		self.prometheus:log_error("No value passed for " .. self.name)
-		return
-	end
-	local err = self:check_labels(label_values)
-	if err ~= nil then
-		self.prometheus:log_error(err)
-		return
-	end
-	self.prometheus:set_gauge(self.name, self.label_names, label_values, value)
+  if value == nil then
+    self.prometheus:log_error("No value passed for " .. self.name)
+    return
+  end
+  local err = self:check_labels(label_values)
+  if err ~= nil then
+    self.prometheus:log_error(err)
+    return
+  end
+  self.prometheus:set_gauge(self.name, self.label_names, label_values, value)
 end
 
 local Histogram = Metric:new()

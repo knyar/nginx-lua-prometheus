@@ -112,7 +112,7 @@ function Gauge:set(value, label_values)
     self.prometheus:log_error(err)
     return
   end
-  self.prometheus:set_gauge(self.name, self.label_names, label_values, value)
+  self.prometheus:set(self.name, self.label_names, label_values, value)
 end
 
 local Histogram = Metric:new()
@@ -409,7 +409,7 @@ end
 --   label_names: (array) a list of label keys.
 --   label_values: (array) a list of label values.
 --   value: (number) the new value for the gauge.
-function Prometheus:set_gauge(name, label_names, label_values, value)
+function Prometheus:set(name, label_names, label_values, value)
   local key = full_metric_name(name, label_names, label_values)
 
   local success, err = self.dict:set(key, value)

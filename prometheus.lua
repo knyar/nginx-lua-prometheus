@@ -416,14 +416,6 @@ function Prometheus:set(name, label_names, label_values, value)
   if success then
     return
   end
-  -- Yes, this looks like a race, so I guess we might under-report some values
-  -- when multiple workers simultaneously try to create the same metric.
-  -- Hopefully this does not happen too often (shared dictionary does not get
-  -- reset during configuation reload).
-  if err == "not found" then
-    self:set_key(key, value)
-    return
-  end
   -- Unexpected error
   self:log_error_kv(key, value, err)
 end

@@ -364,7 +364,8 @@ function Prometheus:histogram(name, description, label_names, buckets)
 end
 
 -- Set a given dictionary key.
--- This overwrites existing values, so we use it only to initialize metrics.
+-- This overwrites existing values, so it should only be used when initializing
+-- metrics or when explicitely overwriting the previous value of a metric.
 function Prometheus:set_key(key, value)
   local ok, err = self.dict:safe_set(key, value)
   if not ok then
@@ -404,6 +405,7 @@ function Prometheus:inc(name, label_names, label_values, value)
 end
 
 -- Set the current value of a gauge to `value`
+--
 -- Args:
 --   name: (string) short metric name without any labels.
 --   label_names: (array) a list of label keys.
@@ -411,13 +413,7 @@ end
 --   value: (number) the new value for the gauge.
 function Prometheus:set(name, label_names, label_values, value)
   local key = full_metric_name(name, label_names, label_values)
-
-  local success, err = self.dict:set(key, value)
-  if success then
-    return
-  end
-  -- Unexpected error
-  self:log_error_kv(key, value, err)
+  self:set_key(key, value)
 end
 
 -- Record a given value into a histogram metric.

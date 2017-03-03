@@ -149,7 +149,7 @@ Example:
 init_by_lua '
   prometheus = require("prometheus").init("prometheus_metrics")
   metric_connections = prometheus:gauge(
-     "nginx_http_connections_total", "The number of client connections", {"state"})
+    "nginx_http_connections", "Number of HTTP connections", {"state"})
 ';
 ```
 

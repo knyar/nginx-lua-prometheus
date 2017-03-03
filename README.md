@@ -118,6 +118,31 @@ init_by_lua '
 ';
 ```
 
+### prometheus:gauge()
+
+**syntax:** prometheus:gauge(*name*, *description*, *label_names*)
+
+Registers a gauge. Should be called once from the
+[init_by_lua](https://github.com/openresty/lua-nginx-module#init_by_lua)
+section.
+
+* `name` is the name of the metric.
+* `description` is the text description that will be presented to Prometheus
+  along with the metric. Optional (pass `nil` if you still need to define
+  label names).
+* `label_names` is an array of label names for the metric. Optional.
+
+Returns a `gauge` object that can later be set.
+
+Example:
+```
+init_by_lua '
+  prometheus = require("prometheus").init("prometheus_metrics")
+  metric_connections = prometheus:gauge(
+     "nginx_http_connections_total", "The number of client connections", {"state"})
+';
+```
+
 ### prometheus:histogram()
 
 **syntax:** prometheus:histogram(*name*, *description*, *label_names*,
@@ -186,6 +211,22 @@ log_by_lua '
   metric_requests:inc(1, {ngx.var.host, ngx.var.status})
 ';
 ```
+
+### gauge:set()
+
+**syntax:** gauge:set(*value*, *label_values*)
+
+Sets the current value of a previously registered gauge. This could be called
+from [log_by_lua](https://github.com/openresty/lua-nginx-module#log_by_lua)
+globally or per server/location to modify a gauge on each request, or from
+[content_by_lua](https://github.com/openresty/lua-nginx-module#content_by_lua)
+just before `prometheus::collect()` to return a real-time value.
+
+* `value` is a value that the gauge should be set to. Required.
+* `label_values` is an array of label values. The number of values should
+  match the number of label names defined when the gauge was registered
+  using `prometheus:gauge()`. No label values should be provided for
+  gauge with no labels.
 
 ### histogram:observe()
 

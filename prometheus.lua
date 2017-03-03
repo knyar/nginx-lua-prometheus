@@ -95,6 +95,26 @@ function Counter:inc(value, label_values)
   self.prometheus:inc(self.name, self.label_names, label_values, value or 1)
 end
 
+local Gauge = Metric:new()
+-- Set a given gauge to `value`
+--
+-- Args:
+--   value: (number) a value to set the gauge to. Should be defined.
+--   label_values: an array of label values. Can be nil (i.e. not defined) for
+--     metrics that have no labels.
+function Gauge:set(value, label_values)
+  if value == nil then
+    self.prometheus:log_error("No value passed for " .. self.name)
+    return
+  end
+  local err = self:check_labels(label_values)
+  if err ~= nil then
+    self.prometheus:log_error(err)
+    return
+  end
+  self.prometheus:set(self.name, self.label_names, label_values, value)
+end
+
 local Histogram = Metric:new()
 -- Record a given value in a histogram.
 --
@@ -275,6 +295,34 @@ function Prometheus:counter(name, description, label_names)
   return Counter:new{name=name, label_names=label_names, prometheus=self}
 end
 
+-- Register a gauge.
+--
+-- Args:
+--   name: (string) name of the metric. Required.
+--   description: (string) description of the metric. Will be used for the HELP
+--     comment on the metrics page. Optional.
+--   label_names: array of strings, defining a list of metrics. Optional.
+--
+-- Returns:
+--   a Gauge object.
+function Prometheus:gauge(name, description, label_names)
+  if not self.initialized then
+    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
+    return
+  end
+
+  if self.registered[name] then
+    self:log_error("Duplicate metric " .. name)
+    return
+  end
+  self.registered[name] = true
+  self.help[name] = description
+  self.type[name] = "gauge"
+
+  return Gauge:new{name=name, label_names=label_names, prometheus=self}
+end
+
+
 -- Register a histogram.
 --
 -- Args:
@@ -316,8 +364,9 @@ function Prometheus:histogram(name, description, label_names, buckets)
 end
 
 -- Set a given dictionary key.
--- This overwrites existing values, so we use it only to initialize metrics.
-function Prometheus:set(key, value)
+-- This overwrites existing values, so it should only be used when initializing
+-- metrics or when explicitely overwriting the previous value of a metric.
+function Prometheus:set_key(key, value)
   local ok, err = self.dict:safe_set(key, value)
   if not ok then
     self:log_error_kv(key, value, err)
@@ -348,11 +397,23 @@ function Prometheus:inc(name, label_names, label_values, value)
   -- Hopefully this does not happen too often (shared dictionary does not get
   -- reset during configuation reload).
   if err == "not found" then
-    self:set(key, value)
+    self:set_key(key, value)
     return
   end
   -- Unexpected error
   self:log_error_kv(key, value, err)
+end
+
+-- Set the current value of a gauge to `value`
+--
+-- Args:
+--   name: (string) short metric name without any labels.
+--   label_names: (array) a list of label keys.
+--   label_values: (array) a list of label values.
+--   value: (number) the new value for the gauge.
+function Prometheus:set(name, label_names, label_values, value)
+  local key = full_metric_name(name, label_names, label_values)
+  self:set_key(key, value)
 end
 
 -- Record a given value into a histogram metric.

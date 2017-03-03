@@ -25,6 +25,8 @@ init_by_lua '
     "nginx_http_requests_total", "Number of HTTP requests", {"host", "status"})
   metric_latency = prometheus:histogram(
     "nginx_http_request_duration_seconds", "HTTP request latency", {"host"})
+  metric_connections = prometheus:gauge(
+    "nginx_http_connections", "Number of HTTP connections", {"state"})
 ';
 log_by_lua '
   local host = ngx.var.host:gsub("^www.", "")
@@ -40,6 +42,7 @@ This:
   `host` and `status`;
 * registers a histogram called `nginx_http_request_duration_seconds` with one
   label `host`;
+* registers a gauge called `nginx_http_connections` with one label `state`;
 * on each HTTP request measures its latency, recording it in the histogram and
   increments the counter, setting current HTTP host as `host` label and
   HTTP status code as `status` label.
@@ -53,12 +56,19 @@ server {
   allow 192.168.0.0/16;
   deny all;
   location /metrics {
-    content_by_lua 'prometheus:collect()';
+    content_by_lua '
+      metric_connections:set(ngx.var.connections_reading, {"reading"})
+      metric_connections:set(ngx.var.connections_waiting, {"waiting"})
+      metric_connections:set(ngx.var.connections_writing, {"writing"})
+      prometheus:collect()
+    ';
   }
 }
 ```
 
-Metrics will be available at `http://your.nginx:9145/metrics`.
+Metrics will be available at `http://your.nginx:9145/metrics`. Note that the
+gauge metric in this example contains values obtained from nginx global state,
+so they get set immediately before metrics are returned to the client.
 
 **Note**: using HTTP host as a metric label value on servers that have many
 virtual hosts has potential performance implications. Please read the caveats
@@ -282,6 +292,12 @@ a minimum.
 
 - `luacheck --globals ngx -- prometheus.lua`
 - `lua prometheus_test.lua`
+
+## Credits
+
+- Created and maintained by Anton Tolchanov (@knyar)
+- Metrix prefix support contributed by david birdsong (@davidbirdsong)
+- Gauge support contributed by Cosmo Petrich (@cosmopetrich)
 
 ## License
 

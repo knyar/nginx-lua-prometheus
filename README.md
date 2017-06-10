@@ -209,10 +209,12 @@ Increments a previously registered counter. This is usually called from
 globally or per server/location.
 
 * `value` is a value that should be added to the counter. Defaults to 1.
-* `label_values` is an array of label values. The number of values should
-  match the number of label names defined when the counter was registered
-  using `prometheus:counter()`. No label values should be provided for
-  counters with no labels.
+* `label_values` is an array of label values.
+
+The number of label values should match the number of label names defined when
+the counter was registered using `prometheus:counter()`. No label values should
+be provided for counters with no labels. Non-printable characters will be
+stripped from label values.
 
 Example:
 ```
@@ -233,10 +235,7 @@ globally or per server/location to modify a gauge on each request, or from
 just before `prometheus::collect()` to return a real-time value.
 
 * `value` is a value that the gauge should be set to. Required.
-* `label_values` is an array of label values. The number of values should
-  match the number of label names defined when the gauge was registered
-  using `prometheus:gauge()`. No label values should be provided for
-  gauge with no labels.
+* `label_values` is an array of label values.
 
 ### histogram:observe()
 
@@ -247,10 +246,7 @@ Records a value in a previously registered histogram. Usually called from
 globally or per server/location.
 
 * `value` is a value that should be recorded. Required.
-* `label_values` is an array of label values. The number of values should
-  match the number of label names defined when the histogram was registered
-  using `prometheus:histogram()`. No label values should be provided for
-  histograms with no labels.
+* `label_values` is an array of label values.
 
 Example:
 ```

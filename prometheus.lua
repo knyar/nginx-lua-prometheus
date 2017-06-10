@@ -59,7 +59,7 @@ end
 --
 -- Returns:
 --   an error message or nil
-function Metric:check_labels(label_values)
+function Metric:check_label_values(label_values)
   if self.label_names == nil and label_values == nil then
     return
   elseif self.label_names == nil and label_values ~= nil then
@@ -87,7 +87,7 @@ local Counter = Metric:new()
 --   label_values: an array of label values. Can be nil (i.e. not defined) for
 --     metrics that have no labels.
 function Counter:inc(value, label_values)
-  local err = self:check_labels(label_values)
+  local err = self:check_label_values(label_values)
   if err ~= nil then
     self.prometheus:log_error(err)
     return
@@ -107,7 +107,7 @@ function Gauge:set(value, label_values)
     self.prometheus:log_error("No value passed for " .. self.name)
     return
   end
-  local err = self:check_labels(label_values)
+  local err = self:check_label_values(label_values)
   if err ~= nil then
     self.prometheus:log_error(err)
     return
@@ -127,7 +127,7 @@ function Histogram:observe(value, label_values)
     self.prometheus:log_error("No value passed for " .. self.name)
     return
   end
-  local err = self:check_labels(label_values)
+  local err = self:check_label_values(label_values)
   if err ~= nil then
     self.prometheus:log_error(err)
     return
@@ -154,8 +154,8 @@ local function full_metric_name(name, label_names, label_values)
   local label_parts = {}
   for idx, key in ipairs(label_names) do
     local label_value = (string.format("%s", label_values[idx])
+      :gsub("[^\032-\126]", "")  -- strip non-printable characters
       :gsub("\\", "\\\\")
-      :gsub("\n", "\\n")
       :gsub('"', '\\"'))
     table.insert(label_parts, key .. '="' .. label_value .. '"')
   end
@@ -224,6 +224,33 @@ local function copy_table(table)
   return new
 end
 
+-- Check metric name and label names for correctness.
+--
+-- Regular expressions to validate metric and label names are
+-- documented in https://prometheus.io/docs/concepts/data_model/
+--
+-- Args:
+--   metric_name: (string) metric name.
+--   label_names: label names (array of strings).
+--
+-- Returns:
+--   Either an error string, or nil of no errors were found.
+local function check_metric_and_label_names(metric_name, label_names)
+  if not metric_name:match("^[a-zA-Z_:][a-zA-Z0-9_:]*$") then
+    return "Metric name '" .. metric_name ..
+           "' contains invalid characters"
+  end
+  for _, label_name in ipairs(label_names or {}) do
+    if label_name == "le" then
+      return "Invalid label name 'le' in " .. metric_name
+    end
+    if not label_name:match("^[a-zA-Z_][a-zA-Z0-9_]*$") then
+      return "Metric '" .. metric_name .. "' label name '" .. label_name ..
+             "' contains invalid characters"
+    end
+  end
+end
+
 -- Initialize the module.
 --
 -- This should be called once from the `init_by_lua` section in nginx
@@ -284,6 +311,12 @@ function Prometheus:counter(name, description, label_names)
     return
   end
 
+  local err = check_metric_and_label_names(name, label_names)
+  if err ~= nil then
+    self:log_error(err)
+    return
+  end
+
   if self.registered[name] then
     self:log_error("Duplicate metric " .. name)
     return
@@ -308,6 +341,12 @@ end
 function Prometheus:gauge(name, description, label_names)
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")
+    return
+  end
+
+  local err = check_metric_and_label_names(name, label_names)
+  if err ~= nil then
+    self:log_error(err)
     return
   end
 
@@ -340,11 +379,10 @@ function Prometheus:histogram(name, description, label_names, buckets)
     return
   end
 
-  for _, label_name in ipairs(label_names or {}) do
-    if label_name == "le" then
-      self:log_error("Invalid label name 'le' in " .. name)
-      return
-    end
+  local err = check_metric_and_label_names(name, label_names)
+  if err ~= nil then
+    self:log_error(err)
+    return
   end
 
   for _, suffix in ipairs({"", "_bucket", "_count", "_sum"}) do

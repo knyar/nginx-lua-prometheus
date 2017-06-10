@@ -89,11 +89,21 @@ function TestPrometheus:testErrorNoMemory()
   luaunit.assertEquals(self.dict:get("willnotfit"), nil)
   luaunit.assertEquals(#ngx.logs, 1)
 end
+function TestPrometheus:testErrorInvalidMetricName()
+  local h = self.p:histogram("name with a space", "Histogram")
+  local g = self.p:gauge("nonprintable\004characters", "Gauge")
+  local c = self.p:counter("0startswithadigit", "Counter")
+
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 3)
+  luaunit.assertEquals(#ngx.logs, 3)
+end
 function TestPrometheus:testErrorInvalidLabels()
   local h = self.p:histogram("hist1", "Histogram", {"le"})
+  local g = self.p:gauge("count1", "Gauge", {"le"})
+  local c = self.p:counter("count1", "Counter", {"foo\002"})
 
-  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
-  luaunit.assertEquals(#ngx.logs, 1)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 3)
+  luaunit.assertEquals(#ngx.logs, 3)
 end
 function TestPrometheus:testErrorDuplicateMetrics()
   self.p:counter("metric1", "Another metric 1")
@@ -143,6 +153,16 @@ function TestPrometheus:testNumericLabelValues()
   luaunit.assertEquals(self.dict:get('l2_sum{var="-3",site="90000"}'), 1)
   luaunit.assertEquals(ngx.logs, nil)
 end
+function TestPrometheus:testNonPrintableLabelValues()
+  self.counter2:inc(1, {"foo", "baz\189\166qux"})
+  self.gauge2:set(1, {"z\001", "\002"})
+  self.hist2:observe(1, {"\166omg", "fooшbar"})
+
+  luaunit.assertEquals(self.dict:get('metric2{f2="foo",f1="bazqux"}'), 1)
+  luaunit.assertEquals(self.dict:get('gauge2{f2="z",f1=""}'), 1)
+  luaunit.assertEquals(self.dict:get('l2_sum{var="omg",site="foobar"}'), 1)
+  luaunit.assertEquals(ngx.logs, nil)
+end
 function TestPrometheus:testNoValues()
   self.counter1:inc()  -- defaults to 1
   self.gauge1:set()  -- should produce an error
@@ -184,19 +204,15 @@ function TestPrometheus:testLatencyHistogram()
 end
 function TestPrometheus:testLabelEscaping()
   self.counter2:inc(1, {"v2", "\""})
-  self.counter2:inc(3, {"v2", "\n"})
   self.counter2:inc(5, {"v2", "\\"})
   self.gauge2:set(1, {"v2", "\""})
-  self.gauge2:set(3, {"v2", "\n"})
   self.gauge2:set(5, {"v2", "\\"})
   self.hist2:observe(0.001, {"ok", "site\"1"})
   self.hist2:observe(0.15, {"ok", "site\"1"})
 
   luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="\\""}'), 1)
-  luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="\\n"}'), 3)
   luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="\\\\"}'), 5)
   luaunit.assertEquals(self.dict:get('gauge2{f2="v2",f1="\\""}'), 1)
-  luaunit.assertEquals(self.dict:get('gauge2{f2="v2",f1="\\n"}'), 3)
   luaunit.assertEquals(self.dict:get('gauge2{f2="v2",f1="\\\\"}'), 5)
   luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site\\"1",le="00.005"}'), 1)
   luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site\\"1",le="00.100"}'), 1)

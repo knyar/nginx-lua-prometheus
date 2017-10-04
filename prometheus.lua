@@ -237,8 +237,7 @@ end
 --   Either an error string, or nil of no errors were found.
 local function check_metric_and_label_names(metric_name, label_names)
   if not metric_name:match("^[a-zA-Z_:][a-zA-Z0-9_:]*$") then
-    return "Metric name '" .. metric_name ..
-           "' contains invalid characters"
+    return "Metric name '" .. metric_name .. "' is invalid"
   end
   for _, label_name in ipairs(label_names or {}) do
     if label_name == "le" then
@@ -246,7 +245,7 @@ local function check_metric_and_label_names(metric_name, label_names)
     end
     if not label_name:match("^[a-zA-Z_][a-zA-Z0-9_]*$") then
       return "Metric '" .. metric_name .. "' label name '" .. label_name ..
-             "' contains invalid characters"
+             "' is invalid"
     end
   end
 end

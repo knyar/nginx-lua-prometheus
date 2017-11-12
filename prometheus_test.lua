@@ -41,9 +41,11 @@ function Nginx.log(level, ...)
   if not ngx.logs then ngx.logs = {} end
   table.insert(ngx.logs, table.concat({...}, " "))
 end
-function Nginx.say(...)
-  if not ngx.said then ngx.said = {} end
-  table.insert(ngx.said, table.concat({...}, ""))
+function Nginx.print(printed)
+  if not ngx.printed then ngx.printed = {} end
+  for str in string.gmatch(table.concat(printed, ""), "([^\n]+)") do
+    table.insert(ngx.printed, str)
+  end
 end
 
 -- Finds index of a given object in a table
@@ -273,32 +275,32 @@ function TestPrometheus:testCollect()
   hist3:observe(5000, {"ok"})
   self.p:collect()
 
-  assert(find_idx(ngx.said, "# HELP metric1 Metric 1") ~= nil)
-  assert(find_idx(ngx.said, "# TYPE metric1 counter") ~= nil)
-  assert(find_idx(ngx.said, "metric1 5") ~= nil)
+  assert(find_idx(ngx.printed, "# HELP metric1 Metric 1") ~= nil)
+  assert(find_idx(ngx.printed, "# TYPE metric1 counter") ~= nil)
+  assert(find_idx(ngx.printed, "metric1 5") ~= nil)
 
-  assert(find_idx(ngx.said, "# TYPE metric2 counter") ~= nil)
-  assert(find_idx(ngx.said, 'metric2{f2="v2",f1="v1"} 4') ~= nil)
+  assert(find_idx(ngx.printed, "# TYPE metric2 counter") ~= nil)
+  assert(find_idx(ngx.printed, 'metric2{f2="v2",f1="v1"} 4') ~= nil)
 
-  assert(find_idx(ngx.said, "# TYPE gauge1 gauge") ~= nil)
-  assert(find_idx(ngx.said, 'gauge1 3') ~= nil)
+  assert(find_idx(ngx.printed, "# TYPE gauge1 gauge") ~= nil)
+  assert(find_idx(ngx.printed, 'gauge1 3') ~= nil)
 
-  assert(find_idx(ngx.said, "# TYPE gauge2 gauge") ~= nil)
-  assert(find_idx(ngx.said, 'gauge2{f2="v2",f1="v1"} 5') ~= nil)
+  assert(find_idx(ngx.printed, "# TYPE gauge2 gauge") ~= nil)
+  assert(find_idx(ngx.printed, 'gauge2{f2="v2",f1="v1"} 5') ~= nil)
 
-  assert(find_idx(ngx.said, "# TYPE b1 histogram") ~= nil)
-  assert(find_idx(ngx.said, "# HELP b1 Bytes") ~= nil)
-  assert(find_idx(ngx.said, 'b1_bucket{var="ok",le="0100.0"} 2') ~= nil)
-  assert(find_idx(ngx.said, 'b1_sum{var="ok"} 5250') ~= nil)
+  assert(find_idx(ngx.printed, "# TYPE b1 histogram") ~= nil)
+  assert(find_idx(ngx.printed, "# HELP b1 Bytes") ~= nil)
+  assert(find_idx(ngx.printed, 'b1_bucket{var="ok",le="0100.0"} 2') ~= nil)
+  assert(find_idx(ngx.printed, 'b1_sum{var="ok"} 5250') ~= nil)
 
-  assert(find_idx(ngx.said, 'l2_bucket{var="ok",site="site2",le="04.000"} 2') ~= nil)
-  assert(find_idx(ngx.said, 'l2_bucket{var="ok",site="site2",le="+Inf"} 4') ~= nil)
+  assert(find_idx(ngx.printed, 'l2_bucket{var="ok",site="site2",le="04.000"} 2') ~= nil)
+  assert(find_idx(ngx.printed, 'l2_bucket{var="ok",site="site2",le="+Inf"} 4') ~= nil)
 
   -- check that type comment exists and is before any samples for the metric.
-  local type_idx = find_idx(ngx.said, '# TYPE l1 histogram')
+  local type_idx = find_idx(ngx.printed, '# TYPE l1 histogram')
   assert (type_idx ~= nil)
-  assert (ngx.said[type_idx-1]:find("^l1") == nil)
-  assert (ngx.said[type_idx+1]:find("^l1") ~= nil)
+  assert (ngx.printed[type_idx-1]:find("^l1") == nil)
+  assert (ngx.printed[type_idx+1]:find("^l1") ~= nil)
   luaunit.assertEquals(ngx.logs, nil)
 end
 
@@ -315,18 +317,18 @@ function TestPrometheus:testCollectWithPrefix()
   hist1:observe(5000, {"ok"})
   p:collect()
 
-  assert(find_idx(ngx.said, "# HELP test_pref_metric1 Metric 1") ~= nil)
-  assert(find_idx(ngx.said, "# TYPE test_pref_metric1 counter") ~= nil)
-  assert(find_idx(ngx.said, "test_pref_metric1 5") ~= nil)
+  assert(find_idx(ngx.printed, "# HELP test_pref_metric1 Metric 1") ~= nil)
+  assert(find_idx(ngx.printed, "# TYPE test_pref_metric1 counter") ~= nil)
+  assert(find_idx(ngx.printed, "test_pref_metric1 5") ~= nil)
 
-  assert(find_idx(ngx.said, "# HELP test_pref_gauge1 Gauge 1") ~= nil)
-  assert(find_idx(ngx.said, "# TYPE test_pref_gauge1 gauge") ~= nil)
-  assert(find_idx(ngx.said, "test_pref_gauge1 3") ~= nil)
+  assert(find_idx(ngx.printed, "# HELP test_pref_gauge1 Gauge 1") ~= nil)
+  assert(find_idx(ngx.printed, "# TYPE test_pref_gauge1 gauge") ~= nil)
+  assert(find_idx(ngx.printed, "test_pref_gauge1 3") ~= nil)
 
-  assert(find_idx(ngx.said, "# TYPE test_pref_b1 histogram") ~= nil)
-  assert(find_idx(ngx.said, "# HELP test_pref_b1 Bytes") ~= nil)
-  assert(find_idx(ngx.said, 'test_pref_b1_bucket{var="ok",le="0100.0"} 2') ~= nil)
-  assert(find_idx(ngx.said, 'test_pref_b1_sum{var="ok"} 5250') ~= nil)
+  assert(find_idx(ngx.printed, "# TYPE test_pref_b1 histogram") ~= nil)
+  assert(find_idx(ngx.printed, "# HELP test_pref_b1 Bytes") ~= nil)
+  assert(find_idx(ngx.printed, 'test_pref_b1_bucket{var="ok",le="0100.0"} 2') ~= nil)
+  assert(find_idx(ngx.printed, 'test_pref_b1_sum{var="ok"} 5250') ~= nil)
 end
 
 os.exit(luaunit.run())

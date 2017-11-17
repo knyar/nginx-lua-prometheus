@@ -7,11 +7,19 @@ This is a Lua library that can be used with Nginx to keep track of metrics and
 expose them on a separate web page to be pulled by
 [Prometheus](https://prometheus.io).
 
-## Quick start guide
+## Installation
 
-You would need to install nginx package with lua support (`nginx-extras` on
-Debian) and make `prometheus.lua` available in your `LUA_PATH` (or just point
-`lua_package_path` to a directory with this git repo).
+You need to install nginx package with lua support (`libnginx-mod-http-lua` on
+newer Debian versions, or `nginx-extras` on older ones). The library file,
+`prometheus.lua`, needs to be available in `LUA_PATH`. If this is the only Lua
+library you use, you can just point `lua_package_path` to the directory with
+this git repo checked out (see example below).
+
+OpenResty users will find this library in [opm](https://opm.openresty.org/). It
+is also available via
+[luarocks](https://luarocks.org/modules/knyar/nginx-lua-prometheus).
+
+## Quick start guide
 
 To track request latency broken down by HTTP host and request count broken
 down by host and status, add the following to `nginx.conf`:

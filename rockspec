@@ -1,5 +1,5 @@
 package = "nginx-lua-prometheus"
-version = "0.1-20170610"
+version = "0.20171117-2"
 
 source = {
   url = "git://github.com/knyar/nginx-lua-prometheus.git"

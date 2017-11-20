@@ -1,1 +1,3 @@
-nginx-lua-prometheus-*
+*.src.rock
+*.tar.gz
+nginx-lua-prometheus-0.*/**

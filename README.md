@@ -39,7 +39,7 @@ init_by_lua '
 log_by_lua '
   local host = ngx.var.host:gsub("^www.", "")
   metric_requests:inc(1, {host, ngx.var.status})
-  metric_latency:observe(ngx.now() - ngx.req.start_time(), {host})
+  metric_latency:observe(tonumber(ngx.var.request_time), {host})
 ';
 ```
 

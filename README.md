@@ -21,8 +21,8 @@ is also available via
 
 ## Quick start guide
 
-To track request latency broken down by HTTP host and request count broken
-down by host and status, add the following to `nginx.conf`:
+To track request latency broken down by server name and request count broken
+down by server name and status, add the following to `nginx.conf`:
 
 ```
 lua_shared_dict prometheus_metrics 10M;
@@ -37,9 +37,8 @@ init_by_lua '
     "nginx_http_connections", "Number of HTTP connections", {"state"})
 ';
 log_by_lua '
-  local host = ngx.var.host:gsub("^www.", "")
-  metric_requests:inc(1, {host, ngx.var.status})
-  metric_latency:observe(tonumber(ngx.var.request_time), {host})
+  metric_requests:inc(1, {ngx.var.server_name, ngx.var.status})
+  metric_latency:observe(tonumber(ngx.var.request_time), {ngx.var.server_name})
 ';
 ```
 
@@ -52,8 +51,8 @@ This:
   label `host`;
 * registers a gauge called `nginx_http_connections` with one label `state`;
 * on each HTTP request measures its latency, recording it in the histogram and
-  increments the counter, setting current HTTP host as `host` label and
-  HTTP status code as `status` label.
+  increments the counter, setting current server name as the `host` label and
+  HTTP status code as the `status` label.
 
 Last step is to configure a separate server that will expose the metrics.
 Please make sure to only make it reachable from your Prometheus server:
@@ -77,10 +76,6 @@ server {
 Metrics will be available at `http://your.nginx:9145/metrics`. Note that the
 gauge metric in this example contains values obtained from nginx global state,
 so they get set immediately before metrics are returned to the client.
-
-**Note**: using HTTP host as a metric label value on servers that have many
-virtual hosts has potential performance implications. Please read the caveats
-section below for more information.
 
 ## API reference
 
@@ -228,7 +223,7 @@ Example:
 ```
 log_by_lua '
   metric_bytes:inc(tonumber(ngx.var.request_length))
-  metric_requests:inc(1, {ngx.var.host, ngx.var.status})
+  metric_requests:inc(1, {ngx.var.server_name, ngx.var.status})
 ';
 ```
 
@@ -259,7 +254,7 @@ globally or per server/location.
 Example:
 ```
 log_by_lua '
-  metric_latency:observe(ngx.now() - ngx.req.start_time(), {ngx.var.host})
+  metric_latency:observe(tonumber(ngx.var.request_time), {ngx.var.server_name})
   metric_response_sizes:observe(tonumber(ngx.var.bytes_sent))
 ';
 ```

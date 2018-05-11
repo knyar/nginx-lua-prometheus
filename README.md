@@ -35,9 +35,23 @@ init_by_lua '
     "nginx_http_request_duration_seconds", "HTTP request latency", {"host"})
   metric_connections = prometheus:gauge(
     "nginx_http_connections", "Number of HTTP connections", {"state"})
+  -- list of allowed values of "host" label
+  prometheus_hosts = {
+    ["127.0.0.1"] = true,
+    ["localhost"] = true,
+    ["foo.example.com"] = true,
+    ["bar.example.com"] = true,
+   }
 ';
 log_by_lua '
   local host = ngx.var.host:gsub("^www.", "")
+  -- Prevent from potentially unbound set of values of "host" label:
+  -- every unique combination of key-value label pairs represents
+  -- a new time series, which can dramatically increase the amount of
+  -- data stored.
+  if not prometheus_hosts[host] then
+    host = "UNKNOWN"
+  end
   metric_requests:inc(1, {host, ngx.var.status})
   metric_latency:observe(tonumber(ngx.var.request_time), {host})
 ';
@@ -51,6 +65,8 @@ This:
 * registers a histogram called `nginx_http_request_duration_seconds` with one
   label `host`;
 * registers a gauge called `nginx_http_connections` with one label `state`;
+* configures a list of allowed values of `host` label in metrics to prevent
+  from exhausting prometheus storage
 * on each HTTP request measures its latency, recording it in the histogram and
   increments the counter, setting current HTTP host as `host` label and
   HTTP status code as `status` label.

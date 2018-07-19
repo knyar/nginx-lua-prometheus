@@ -81,6 +81,12 @@ function TestPrometheus:testErrorUnitialized()
 
   luaunit.assertEquals(#ngx.logs, 3)
 end
+function TestPrometheus:testErrorUnknownDict()
+  local p = prometheus.init("nonexistent")
+  luaunit.assertEquals(p.initialized, false)
+  luaunit.assertEquals(#ngx.logs, 1)
+  luaunit.assertStrContains(ngx.logs[1], "does not seem to exist")
+end
 function TestPrometheus:testErrorNoMemory()
   local counter3 = self.p:counter("willnotfit")
   self.counter1:inc(5)

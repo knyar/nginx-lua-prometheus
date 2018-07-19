@@ -265,7 +265,14 @@ end
 --   an object that should be used to register metrics.
 function Prometheus.init(dict_name, prefix)
   local self = setmetatable({}, Prometheus)
-  self.dict = ngx.shared[dict_name or "prometheus_metrics"]
+  dict_name = dict_name or "prometheus_metrics"
+  self.dict = ngx.shared[dict_name]
+  if self.dict == nil then
+    ngx.log(ngx.ERR,
+      "Dictionary '", dict_name, "' does not seem to exist. ",
+      "Please define the dictionary using `lua_shared_dict`.")
+    return self
+  end
   self.help = {}
   if prefix then
     self.prefix = prefix

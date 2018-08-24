@@ -21,8 +21,17 @@ is also available via
 
 ## Quick start guide
 
-To track request latency broken down by server name and request count broken
-down by server name and status, add the following to `nginx.conf`:
+In case you use an external module for nginx-lua-support (e.g. the
+`libnginx-mod-http-lua` package on Debian) first add
+
+    load_module modules/ndk_http_module.so;
+    load_module modules/ngx_http_lua_module.so;
+
+to the beginning of `nginx.conf`.
+
+To then track request latency broken down by server name and request count
+broken down by server name and status, add the following to the `http` section
+of `nginx.conf`:
 
 ```
 lua_shared_dict prometheus_metrics 10M;

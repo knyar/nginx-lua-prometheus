@@ -21,15 +21,7 @@ is also available via
 
 ## Quick start guide
 
-In case you use an external module for nginx-lua-support (e.g. the
-`libnginx-mod-http-lua` package on Debian) first add
-
-    load_module modules/ndk_http_module.so;
-    load_module modules/ngx_http_lua_module.so;
-
-to the beginning of `nginx.conf`.
-
-To then track request latency broken down by server name and request count
+To track request latency broken down by server name and request count
 broken down by server name and status, add the following to the `http` section
 of `nginx.conf`:
 
@@ -85,6 +77,16 @@ server {
 Metrics will be available at `http://your.nginx:9145/metrics`. Note that the
 gauge metric in this example contains values obtained from nginx global state,
 so they get set immediately before metrics are returned to the client.
+
+If you experience problems indicating that nginx doesn't know how to interpret
+lua-commands and you use an external module for nginx-lua-support (e.g. the
+`libnginx-mod-http-lua` package on Debian) try adding
+
+    load_module modules/ndk_http_module.so;
+    load_module modules/ngx_http_lua_module.so;
+
+to the beginning of `nginx.conf` to ensure the modules are loaded.
+
 
 ## API reference
 

@@ -303,6 +303,17 @@ a minimum.
 - `luacheck --globals ngx -- prometheus.lua`
 - `lua prometheus_test.lua`
 
+## Alerting rules samples:
+
+- Too many HTTP requests with status 4xx (> 5%):
+```
+sum(rate(nginx_http_requests_total{status=~"^4.."}[1m])) / sum(rate(nginx_http_requests_total{}[1m])) * 100 > 5
+```
+- Too many HTTP requests with status 5xx (> 5%):
+```
+sum(rate(nginx_http_requests_total{status=~"^5.."}[1m])) / sum(rate(nginx_http_requests_total{}[1m])) * 100 > 5
+```
+
 ## Credits
 
 - Created and maintained by Anton Tolchanov (@knyar)

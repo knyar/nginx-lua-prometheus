@@ -535,7 +535,7 @@ function Prometheus:collect()
       self:log_error("Error getting '", key, "': ", err)
     end
   end
-  return output
+  return table.concat(output, "")
 end
 
 return Prometheus

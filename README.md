@@ -58,6 +58,8 @@ This:
 Last step is to configure a separate server that will expose the metrics.
 Please make sure to only make it reachable from your Prometheus server:
 
+HTTP
+
 ```
 server {
   listen 9145;
@@ -68,11 +70,36 @@ server {
       metric_connections:set(ngx.var.connections_reading, {"reading"})
       metric_connections:set(ngx.var.connections_waiting, {"waiting"})
       metric_connections:set(ngx.var.connections_writing, {"writing"})
-      prometheus:collect()
+      ngx.header.content_type = "text/plain"
+      ngx.print(prometheus:collect())
     ';
   }
 }
 ```
+
+Stream
+
+```
+server {
+  listen 9145;
+  content_by_lua '
+    local sock = assert(ngx.req.socket(true))
+    local data = sock:receive()
+    local location = "GET /metrics"
+    if string.sub(data, 1, string.len(location)) == location then
+      ngx.say("HTTP/1.1 200 OK")
+      ngx.say("Content-Type: text/plain")
+      ngx.say("")
+      ngx.say(prometheus:collect())
+    else
+      ngx.say("HTTP/1.1 404 Not Found")
+    end
+  ';
+  }
+
+```
+
+
 
 Metrics will be available at `http://your.nginx:9145/metrics`. Note that the
 gauge metric in this example contains values obtained from nginx global state,

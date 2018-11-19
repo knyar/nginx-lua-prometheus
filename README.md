@@ -214,6 +214,14 @@ location /metrics {
 }
 ```
 
+### prometheus:metric_data()
+
+**syntax:** prometheus:metric_data()
+
+Prometheus compatible metric data strings splitted by line
+
+* `returns` Array of strings with all metrics in a text format compatible with Prometheus.
+
 ### counter:inc()
 
 **syntax:** counter:inc(*value*, *label_values*)
@@ -290,6 +298,30 @@ There is no elegant solution to this issue (besides keeping metrics in a
 separate storage system external to nginx), so for latency-critical servers you
 might want to keep the number of metrics (and distinct metric label values) to
 a minimum.
+
+### Usage in stream module
+
+For now, there is no way to share dictionary between HTTP and Stream modules in Nginx.
+To return Stream's metrics you must do it inside that module.
+
+```
+server {
+  listen 9145;
+  content_by_lua '
+    local sock = assert(ngx.req.socket(true))
+    local data = sock:receive()
+    local location = "GET /metrics"
+    if string.sub(data, 1, string.len(location)) == location then
+      ngx.say("HTTP/1.1 200 OK")
+      ngx.say("Content-Type: text/plain")
+      ngx.say("")
+      ngx.say(table.concat(prometheus:metric_data(), ""))
+    else
+      ngx.say("HTTP/1.1 404 Not Found")
+    end
+  ';
+  }
+```
 
 ## Development
 

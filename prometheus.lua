@@ -493,13 +493,11 @@ function Prometheus:histogram_observe(name, label_names, label_values, value)
   end
 end
 
--- Present all metrics in a text format compatible with Prometheus.
+-- Prometheus compatible metric data strings splitted by line
 --
--- This function should be used to expose the metrics on a separate HTTP page.
--- It will get the metrics from the dictionary, sort them, and expose them
--- aling with TYPE and HELP comments.
-function Prometheus:collect()
-  ngx.header.content_type = "text/plain"
+-- Returns:
+--   Array of strings with all metrics in a text format compatible with Prometheus.
+function Prometheus:metric_data()
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")
     return
@@ -536,7 +534,17 @@ function Prometheus:collect()
       self:log_error("Error getting '", key, "': ", err)
     end
   end
-  ngx.print(output)
+  return output
+end
+
+-- Present all metrics in a text format compatible with Prometheus.
+--
+-- This function should be used to expose the metrics on a separate HTTP page.
+-- It will get the metrics from the dictionary, sort them, and expose them
+-- aling with TYPE and HELP comments.
+function Prometheus:collect()
+  ngx.header.content_type = "text/plain"
+  ngx.print(self:metric_data())
 end
 
 return Prometheus

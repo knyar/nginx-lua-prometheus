@@ -218,9 +218,7 @@ location /metrics {
 
 **syntax:** prometheus:metric_data()
 
-Prometheus compatible metric data strings splitted by line
-
-* `returns` Array of strings with all metrics in a text format compatible with Prometheus.
+Returns metric data as an array of strings.
 
 ### counter:inc()
 
@@ -286,6 +284,8 @@ to configure an alert on that metric.
 
 ## Caveats
 
+### Large number of metrics
+
 Please keep in mind that all metrics stored by this library are kept in a
 single shared dictionary (`lua_shared_dict`). While exposing metrics the module
 has to list all dictionary keys, which has serious performance implications for
@@ -301,8 +301,10 @@ a minimum.
 
 ### Usage in stream module
 
-For now, there is no way to share dictionary between HTTP and Stream modules in Nginx.
-To return Stream's metrics you must do it inside that module.
+For now, there is no way to share a dictionary between HTTP and Stream modules
+in Nginx. If you are using this library to collect metrics from stream module,
+you will need to configure a separate endpoint to return them. Here's an
+example.
 
 ```
 server {

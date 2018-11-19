@@ -493,10 +493,11 @@ function Prometheus:histogram_observe(name, label_names, label_values, value)
   end
 end
 
--- Prometheus compatible metric data strings splitted by line
+-- Prometheus compatible metric data as an array of strings.
 --
 -- Returns:
---   Array of strings with all metrics in a text format compatible with Prometheus.
+--   Array of strings with all metrics in a text format compatible with
+--   Prometheus.
 function Prometheus:metric_data()
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")

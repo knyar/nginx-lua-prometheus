@@ -337,6 +337,14 @@ server {
 - `luacheck --globals ngx -- prometheus.lua`
 - `lua prometheus_test.lua`
 
+### Releasing new version
+
+- update version in the `dist.ini`
+- rename `.rockspec` file and update version inside it
+- commit changes
+- push to luarocks: `luarocks upload nginx-lua-prometheus-0.20181120-1.rockspec`
+- upload to OPM: `opm build && opm upload`
+
 ## Credits
 
 - Created and maintained by Anton Tolchanov (@knyar)

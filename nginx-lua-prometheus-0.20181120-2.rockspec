@@ -1,7 +1,7 @@
 -- Note, this file must have version in its name
 -- (see https://github.com/knyar/nginx-lua-prometheus/issues/27)
 package = "nginx-lua-prometheus"
-version = "0.20171117-4"
+version = "0.20181120-2"
 
 source = {
   url = "git://github.com/knyar/nginx-lua-prometheus.git"

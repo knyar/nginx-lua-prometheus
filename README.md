@@ -344,6 +344,7 @@ server {
 - commit changes
 - push to luarocks: `luarocks upload nginx-lua-prometheus-0.20181120-1.rockspec`
 - upload to OPM: `opm build && opm upload`
+- create a new Git tag: `git tag 0.XXXXXXXX-X && git push origin 0.XXXXXXXX-X`
 
 ## Credits
 

@@ -78,8 +78,9 @@ function TestPrometheus:testErrorUnitialized()
   p:counter("metric1")
   p:histogram("metric2")
   p:gauge("metric3")
+  p:metric_data()
 
-  luaunit.assertEquals(#ngx.logs, 3)
+  luaunit.assertEquals(#ngx.logs, 4)
 end
 function TestPrometheus:testErrorUnknownDict()
   local p = prometheus.init("nonexistent")

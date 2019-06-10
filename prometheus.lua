@@ -115,6 +115,39 @@ function Gauge:set(value, label_values)
   self.prometheus:set(self.name, self.label_names, label_values, value)
 end
 
+
+-- Increase a given gauge by `value`
+--
+-- Args:
+--   value: (number) a value to add to the gauge. Defaults to 1 if skipped.
+--   label_values: an array of label values. Can be nil (i.e. not defined) for
+--     metrics that have no labels.
+function Gauge:inc(value, label_values)
+  local err = self:check_label_values(label_values)
+  if err ~= nil then
+    self.prometheus:log_error(err)
+    return
+  end
+  self.prometheus:inc(self.name, self.label_names, label_values, value or 1)
+end
+
+
+-- Decrease a given gauge by `value`
+--
+-- Args:
+--   value: (number) subtracts the given value from the gauge. Defaults to 1 if skipped.
+--   label_values: an array of label values. Can be nil (i.e. not defined) for
+--     metrics that have no labels.
+function Gauge:dec(value, label_values)
+  local err = self:check_label_values(label_values)
+  if err ~= nil then
+    self.prometheus:log_error(err)
+    return
+  end
+  self.prometheus:dec(self.name, self.label_names, label_values, value or 1)
+end
+
+
 local Histogram = Metric:new()
 -- Record a given value in a histogram.
 --
@@ -417,7 +450,7 @@ function Prometheus:set_key(key, value)
   end
 end
 
--- Increment a given counter by `value`.
+-- Increment a given counter or gauge by `value`.
 --
 -- Args:
 --   name: (string) short metric name without any labels.
@@ -433,6 +466,37 @@ function Prometheus:inc(name, label_names, label_values, value)
   end
 
   local newval, err = self.dict:incr(key, value)
+  if newval then
+    return
+  end
+  -- Yes, this looks like a race, so I guess we might under-report some values
+  -- when multiple workers simultaneously try to create the same metric.
+  -- Hopefully this does not happen too often (shared dictionary does not get
+  -- reset during configuation reload).
+  if err == "not found" then
+    self:set_key(key, value)
+    return
+  end
+  -- Unexpected error
+  self:log_error_kv(key, value, err)
+end
+
+-- Decrement a given gauge by `value`.
+--
+-- Args:
+--   name: (string) short metric name without any labels.
+--   label_names: (array) a list of label keys.
+--   label_values: (array) a list of label values.
+--   value: (number) value to add. Optional, defaults to 1.
+function Prometheus:dec(name, label_names, label_values, value)
+  local key = full_metric_name(name, label_names, label_values)
+  if value == nil then value = 1 end
+  if value < 0 then
+    self:log_error_kv(key, value, "Value should not be negative")
+    return
+  end
+
+  local newval, err = self.dict:incr(key, 0 - value)
   if newval then
     return
   end

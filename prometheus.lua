@@ -505,11 +505,11 @@ function Prometheus:dec(name, label_names, label_values, value)
   -- Hopefully this does not happen too often (shared dictionary does not get
   -- reset during configuation reload).
   if err == "not found" then
-    self:set_key(key, value)
+    self:set_key(key, 0 - value)
     return
   end
   -- Unexpected error
-  self:log_error_kv(key, value, err)
+  self:log_error_kv(key, 0 - value, err)
 end
 
 -- Set the current value of a gauge to `value`

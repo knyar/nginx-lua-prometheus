@@ -243,7 +243,7 @@ function TestPrometheus:testGaugeIncDec()
   self.gauge2:dec(20, {"f2value", "f1value"})
   luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), -18)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 4)
-  
+
   self.gauge1:inc(1, {"should-be-no-labels"})
   self.gauge1:dec(1, {"should-be-no-labels"})
   self.gauge2:inc(1, {"too-few-labels"})
@@ -251,6 +251,12 @@ function TestPrometheus:testGaugeIncDec()
   luaunit.assertEquals(self.dict:get("gauge1"), -1)
   luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), -18)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 8)
+
+
+  self.gauge2:dec(1, {"f2value", "f1value_new"})
+  luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value_new"}'), -1)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 8)
+
 
 end
 function TestPrometheus:testLatencyHistogram()

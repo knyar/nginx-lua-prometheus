@@ -274,14 +274,6 @@ the gauge was registered using `prometheus:gauge()`. No label values should
 be provided for gauges with no labels. Non-printable characters will be
 stripped from label values.
 
-Example:
-```
-init_worker_by_lua '
-  metric_bytes:inc(tonumber(ngx.var.request_length))
-  metric_requests:inc(1, {ngx.var.server_name, ngx.var.status})
-';
-```
-
 ### histogram:observe()
 
 **syntax:** histogram:observe(*value*, *label_values*)

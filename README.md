@@ -257,6 +257,31 @@ just before `prometheus::collect()` to return a real-time value.
 * `value` is a value that the gauge should be set to. Required.
 * `label_values` is an array of label values.
 
+### gauge:inc()
+
+**syntax:** gauge:inc(*value*, *label_values*)
+
+Increments or decrements a previously registered gauge. This is usually called 
+when you want to observe the real-time value of a metric that can both be 
+increased and decreased.
+
+* `value` is a value that should be added to the gauge. It could be a negative 
+value when you need to decrease the value of the gauge. Defaults to 1.
+* `label_values` is an array of label values.
+
+The number of label values should match the number of label names defined when
+the gauge was registered using `prometheus:gauge()`. No label values should
+be provided for gauges with no labels. Non-printable characters will be
+stripped from label values.
+
+Example:
+```
+init_worker_by_lua '
+  metric_bytes:inc(tonumber(ngx.var.request_length))
+  metric_requests:inc(1, {ngx.var.server_name, ngx.var.status})
+';
+```
+
 ### histogram:observe()
 
 **syntax:** histogram:observe(*value*, *label_values*)

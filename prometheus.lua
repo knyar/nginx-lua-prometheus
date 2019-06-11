@@ -124,7 +124,8 @@ end
 -- Increase a given gauge by `value`
 --
 -- Args:
---   value: (number) a value to add to the gauge (a negative value when you need to decrease the value of the gauge). Defaults to 1 if skipped.
+--   value: (number) a value to add to the gauge (a negative value when you
+--     need to decrease the value of the gauge). Defaults to 1 if skipped.
 --   label_values: an array of label values. Can be nil (i.e. not defined) for
 --     metrics that have no labels.
 function Gauge:inc(value, label_values)
@@ -444,7 +445,8 @@ end
 --   name: (string) short metric name without any labels.
 --   label_names: (array) a list of label keys.
 --   label_values: (array) a list of label values.
---   value: (number) value to add (a negative value when you need to decrease the value of the gauge). Optional, defaults to 1.
+--   value: (number) value to add (a negative value when you need to decrease
+--     the value of the gauge). Optional, defaults to 1.
 function Prometheus:inc(name, label_names, label_values, value)
   local key = full_metric_name(name, label_names, label_values)
   if value == nil then value = 1 end

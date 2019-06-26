@@ -100,6 +100,11 @@ function Counter:inc(value, label_values)
   self.prometheus:inc(self.name, self.label_names, label_values, value or 1)
 end
 
+function Counter:reset()
+  self.prometheus:reset(self.name)
+end
+
+
 local Gauge = Metric:new()
 -- Set a given gauge to `value`
 --
@@ -118,6 +123,21 @@ function Gauge:set(value, label_values)
     return
   end
   self.prometheus:set(self.name, self.label_names, label_values, value)
+end
+
+
+function Gauge:del(label_values)
+  local err = self:check_label_values(label_values)
+  if err ~= nil then
+    self.prometheus:log_error(err)
+    return
+  end
+  self.prometheus:set(self.name, self.label_names, label_values, nil)
+end
+
+
+function Gauge:reset()
+  self.prometheus:reset(self.name)
 end
 
 
@@ -508,6 +528,32 @@ function Prometheus:histogram_observe(name, label_names, label_values, value)
       -- last label is now "le"
       l_values[label_count] = self.bucket_format[name]:format(bucket)
       self:inc(name .. "_bucket", l_names, l_values, 1)
+    end
+  end
+end
+
+
+function Prometheus:reset(name)
+  if self.registered[name] ~= true then
+    self:log_error("Metric[" .. name .. "] is not registered")
+    return
+  end
+
+  if self.type[name] ~= "gauge" and self.type[name] ~= "counter" then
+    self:log_error("Only gauge and counter can reset")
+    return
+  end
+
+  local keys = self.dict:get_keys(0)
+  for _, key in ipairs(keys) do
+    local value, err = self.dict:get(key)
+    if value then
+      local short_name = short_metric_name(key)
+      if name == short_name then
+        self:set_key(key, nil)
+      end
+    else
+      self:log_error("Error getting '", key, "': ", err)
     end
   end
 end

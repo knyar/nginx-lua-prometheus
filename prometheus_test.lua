@@ -23,6 +23,10 @@ function SimpleDict:incr(k, v)
   return self.dict[k], nil  -- newval, err
 end
 function SimpleDict:get(k)
+  -- simulate an error
+  if k == "gauge2{f2=\"dict_error\",f1=\"dict_error\"}" then
+    return nil, 0
+  end
   return self.dict[k], 0  -- value, flags
 end
 function SimpleDict:get_keys(k)
@@ -323,6 +327,12 @@ function TestPrometheus:testReset()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
   luaunit.assertEquals(self.dict:get("gauge1"), 3)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  -- error get from dict
+  self.gauge2:inc(4, {"dict_error", "dict_error"})
+  self.gauge2:reset()
+  luaunit.assertEquals(self.dict:get('gauge2{f2="dict_error",f1="dict_error"}'), nil)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
 end
 function TestPrometheus:testLatencyHistogram()
   self.hist1:observe(0.35)

@@ -236,14 +236,38 @@ function TestPrometheus:testGaugeDel()
   luaunit.assertEquals(self.dict:get("gauge1"), nil)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
-
   self.gauge2:inc(1, {"f2value", "f1value"})
   luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), 1)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
+  self.gauge2:del({"f2value"})
+  luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), 1)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
+
   self.gauge2:del({"f2value", "f1value"})
   luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), nil)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
+end
+function TestPrometheus:testCounterDel()
+  self.counter1:inc(1)
+  luaunit.assertEquals(self.dict:get("metric1"), 1)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.counter1:del()
+  luaunit.assertEquals(self.dict:get("metric1"), nil)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.counter2:inc(1, {"f2value", "f1value"})
+  luaunit.assertEquals(self.dict:get('metric2{f2="f2value",f1="f1value"}'), 1)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.counter2:del()
+  luaunit.assertEquals(self.dict:get('metric2{f2="f2value",f1="f1value"}'), 1)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
+
+  self.counter2:del({"f2value", "f1value"})
+  luaunit.assertEquals(self.dict:get('metric2{f2="f2value",f1="f1value"}'), nil)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
 end
 function TestPrometheus:testReset()
   self.gauge1:inc(1)

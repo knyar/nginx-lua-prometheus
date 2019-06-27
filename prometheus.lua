@@ -552,18 +552,9 @@ function Prometheus:histogram_observe(name, label_names, label_values, value)
   end
 end
 
-
+-- Delete all metrics in a gauge or counter. If this gauge or counter have labels, it
+--   will delete all the metrics with different label values.
 function Prometheus:reset(name)
-  if self.registered[name] ~= true then
-    self:log_error("Metric[" .. name .. "] is not registered")
-    return
-  end
-
-  if self.type[name] ~= "gauge" and self.type[name] ~= "counter" then
-    self:log_error("Only gauge and counter can reset")
-    return
-  end
-
   local keys = self.dict:get_keys(0)
   for _, key in ipairs(keys) do
     local value, err = self.dict:get(key)

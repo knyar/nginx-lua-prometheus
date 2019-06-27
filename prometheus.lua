@@ -100,10 +100,26 @@ function Counter:inc(value, label_values)
   self.prometheus:inc(self.name, self.label_names, label_values, value or 1)
 end
 
+-- Delete a given counter
+--
+-- Args:
+--   label_values: an array of label values. Can be nil (i.e. not defined) for
+--     metrics that have no labels.
+function Counter:del(label_values)
+  local err = self:check_label_values(label_values)
+  if err ~= nil then
+    self.prometheus:log_error(err)
+    return
+  end
+  self.prometheus:set(self.name, self.label_names, label_values, nil)
+end
+
+-- Delete all metrics for this counter. If this counter have no labels, it is
+--   just the same as Counter:del() function. If this counter have labels, it
+--   will delete all the metrics with different label values.
 function Counter:reset()
   self.prometheus:reset(self.name)
 end
-
 
 local Gauge = Metric:new()
 -- Set a given gauge to `value`
@@ -125,7 +141,11 @@ function Gauge:set(value, label_values)
   self.prometheus:set(self.name, self.label_names, label_values, value)
 end
 
-
+-- Delete a given gauge
+--
+-- Args:
+--   label_values: an array of label values. Can be nil (i.e. not defined) for
+--     metrics that have no labels.
 function Gauge:del(label_values)
   local err = self:check_label_values(label_values)
   if err ~= nil then
@@ -135,11 +155,12 @@ function Gauge:del(label_values)
   self.prometheus:set(self.name, self.label_names, label_values, nil)
 end
 
-
+-- Delete all metrics for this gauge. If this gauge have no labels, it is
+--   just the same as Gauge:del() function. If this gauge have labels, it
+--   will delete all the metrics with different label values.
 function Gauge:reset()
   self.prometheus:reset(self.name)
 end
-
 
 -- Increase a given gauge by `value`
 --
@@ -408,7 +429,6 @@ function Prometheus:gauge(name, description, label_names)
 
   return Gauge:new{name=name, label_names=label_names, prometheus=self}
 end
-
 
 -- Register a histogram.
 --

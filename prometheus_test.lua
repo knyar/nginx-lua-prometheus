@@ -23,6 +23,10 @@ function SimpleDict:incr(k, v)
   return self.dict[k], nil  -- newval, err
 end
 function SimpleDict:get(k)
+  -- simulate an error
+  if k == "gauge2{f2=\"dict_error\",f1=\"dict_error\"}" then
+    return nil, 0
+  end
   return self.dict[k], 0  -- value, flags
 end
 function SimpleDict:get_keys(k)
@@ -226,6 +230,109 @@ function TestPrometheus:testGaugeIncDec()
   luaunit.assertEquals(self.dict:get("gauge1"), 3)
   luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), -1)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 2)
+end
+function TestPrometheus:testGaugeDel()
+  self.gauge1:inc(1)
+  luaunit.assertEquals(self.dict:get("gauge1"), 1)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.gauge1:del()
+  luaunit.assertEquals(self.dict:get("gauge1"), nil)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.gauge2:inc(1, {"f2value", "f1value"})
+  luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), 1)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.gauge2:del({"f2value"})
+  luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), 1)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
+
+  self.gauge2:del({"f2value", "f1value"})
+  luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), nil)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
+end
+function TestPrometheus:testCounterDel()
+  self.counter1:inc(1)
+  luaunit.assertEquals(self.dict:get("metric1"), 1)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.counter1:del()
+  luaunit.assertEquals(self.dict:get("metric1"), nil)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.counter2:inc(1, {"f2value", "f1value"})
+  luaunit.assertEquals(self.dict:get('metric2{f2="f2value",f1="f1value"}'), 1)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.counter2:del()
+  luaunit.assertEquals(self.dict:get('metric2{f2="f2value",f1="f1value"}'), 1)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
+
+  self.counter2:del({"f2value", "f1value"})
+  luaunit.assertEquals(self.dict:get('metric2{f2="f2value",f1="f1value"}'), nil)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
+end
+function TestPrometheus:testReset()
+  self.gauge1:inc(1)
+  luaunit.assertEquals(self.dict:get("gauge1"), 1)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.gauge1:reset()
+  luaunit.assertEquals(self.dict:get("gauge1"), nil)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.gauge1:inc(3)
+  luaunit.assertEquals(self.dict:get("gauge1"), 3)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.gauge2:inc(1, {"f2value", "f1value"})
+  luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), 1)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.gauge2:inc(4, {"f2value", "f1value2"})
+  luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value2"}'), 4)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.gauge2:reset()
+  luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), nil)
+  luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value2"}'), nil)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+  luaunit.assertEquals(self.dict:get("gauge1"), 3)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.counter1:inc()
+  self.counter1:inc(4)
+  self.counter2:inc(1, {"v2", "v1"})
+  self.counter2:inc(3, {"v2", "v2"})
+
+  luaunit.assertEquals(self.dict:get("metric1"), 5)
+  luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="v1"}'), 1)
+  luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="v2"}'), 3)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.counter1:reset()
+  luaunit.assertEquals(self.dict:get("metric1"), nil)
+  luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="v1"}'), 1)
+  luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="v2"}'), 3)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  self.counter1:inc(4)
+  self.counter2:reset()
+  luaunit.assertEquals(self.dict:get("metric1"), 4)
+  luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="v1"}'), nil)
+  luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="v2"}'), nil)
+  luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), nil)
+  luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value2"}'), nil)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+  luaunit.assertEquals(self.dict:get("gauge1"), 3)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  -- error get from dict
+  self.gauge2:inc(4, {"dict_error", "dict_error"})
+  self.gauge2:reset()
+  luaunit.assertEquals(self.dict:get('gauge2{f2="dict_error",f1="dict_error"}'), nil)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
 end
 function TestPrometheus:testLatencyHistogram()
   self.hist1:observe(0.35)

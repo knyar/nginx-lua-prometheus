@@ -244,6 +244,31 @@ log_by_lua '
 ';
 ```
 
+### counter:del()
+
+**syntax:** counter:del(*label_values*)
+
+Delete a previously registered counter. This is usually called when you don't 
+need to observe such counter (or a metric with specific label values in this 
+counter) any more. If this counter has labels, you have to pass `label_values` 
+to delete the specific metric of this counter. If you want to delete all the 
+metrics of a counter with labels, you should call `Counter:reset()`.
+
+* `label_values` is an array of label values.
+
+The number of label values should match the number of label names defined when
+the counter was registered using `prometheus:counter()`. No label values should
+be provided for counters with no labels. Non-printable characters will be
+stripped from label values.
+
+### counter:reset()
+
+**syntax:** counter:reset()
+
+Delete all metrics for a previously registered counter. If this counter have no 
+labels, it is just the same as `Counter:del()` function. If this counter have labels, 
+it will delete all the metrics with different label values.
+
 ### gauge:set()
 
 **syntax:** gauge:set(*value*, *label_values*)
@@ -273,6 +298,31 @@ The number of label values should match the number of label names defined when
 the gauge was registered using `prometheus:gauge()`. No label values should
 be provided for gauges with no labels. Non-printable characters will be
 stripped from label values.
+
+### gauge:del()
+
+**syntax:** gauge:del(*label_values*)
+
+Delete a previously registered gauge. This is usually called when you don't 
+need to observe such gauge (or a metric with specific label values in this 
+gauge) any more. If this gauge has labels, you have to pass `label_values` 
+to delete the specific metric of this gauge. If you want to delete all the 
+metrics of a gauge with labels, you should call `Gauge:reset()`.
+
+* `label_values` is an array of label values.
+
+The number of label values should match the number of label names defined when
+the gauge was registered using `prometheus:gauge()`. No label values should
+be provided for gauges with no labels. Non-printable characters will be
+stripped from label values.
+
+### gauge:reset()
+
+**syntax:** gauge:reset()
+
+Delete all metrics for a previously registered gauge. If this gauge have no 
+labels, it is just the same as `Gauge:del()` function. If this gauge have labels, 
+it will delete all the metrics with different label values.
 
 ### histogram:observe()
 

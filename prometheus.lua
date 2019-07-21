@@ -38,6 +38,15 @@
 -- https://github.com/knyar/nginx-lua-prometheus
 -- Released under MIT license.
 
+local setmetatable = setmetatable
+local ipairs = ipairs
+local type = type
+local tostring = tostring
+local assert = assert
+local math = math
+local string = string
+local ngx = ngx
+local table = table
 
 -- Default set of latency buckets, 5ms to 10s:
 local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
@@ -93,7 +102,8 @@ function Counter:inc(value, label_values)
     return
   end
   if value ~= nil and value < 0 then
-    self.prometheus:log_error_kv(self.name, value, "Value should not be negative")
+    self.prometheus:log_error_kv(self.name, value,
+                                 "Value should not be negative")
     return
   end
 
@@ -195,7 +205,8 @@ function Histogram:observe(value, label_values)
     self.prometheus:log_error(err)
     return
   end
-  self.prometheus:histogram_observe(self.name, self.label_names, label_values, value)
+  self.prometheus:histogram_observe(self.name, self.label_names, label_values,
+                                    value)
 end
 
 local Prometheus = {}
@@ -584,8 +595,8 @@ function Prometheus:histogram_observe(name, label_names, label_values, value)
   end
 end
 
--- Delete all metrics in a gauge or counter. If this gauge or counter have labels, it
---   will delete all the metrics with different label values.
+-- Delete all metrics in a gauge or counter. If this gauge or counter have
+--   labels, it will delete all the metrics with different label values.
 function Prometheus:reset(name)
   local keys = self.dict:get_keys(0)
   for _, key in ipairs(keys) do

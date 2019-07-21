@@ -210,20 +210,52 @@ Prometheus.initialized = false
 --   label_values: (array) a list of label values.
 -- Returns:
 --   (string) full metric name.
-local function full_metric_name(name, label_names, label_values)
+local full_metric_name
+do
+    local lru = require("resty.lrucache").new(128)
+    local name_items = {}
+    local name_idx = 0
+    local concat = table.concat
+
+function full_metric_name(name, label_names, label_values)
   if not label_names then
     return name
   end
-  local label_parts = {}
-  for idx, key in ipairs(label_names) do
-    local label_value = (string.format("%s", label_values[idx])
-      :gsub("[^\032-\126]", "")  -- strip non-printable characters
-      :gsub("\\", "\\\\")
-      :gsub('"', '\\"'))
-    table.insert(label_parts, key .. '="' .. label_value .. '"')
+
+  name_items[1] = name
+  name_items[2] = "{"
+  name_idx = 2
+
+  for i, key in ipairs(label_names) do
+    local label_value = label_values[i]
+    if type(label_value) == "string" then
+        local org_label_value = label_value
+        label_value = lru:get(org_label_value)
+        if not label_value then
+            label_value = tostring(org_label_value)
+                    :gsub("[^\032-\126]", "")  -- strip non-printable characters
+                    :gsub("\\", "\\\\")
+                    :gsub('"', '\\"')
+            lru:set(org_label_value, label_value)
+        end
+    end
+
+    if name_idx > 2 then
+        name_idx = name_idx + 1
+        name_items[name_idx] = ","
+    end
+
+    name_items[name_idx + 1] = key
+    name_items[name_idx + 2] = [[="]]
+    name_items[name_idx + 3] = label_value
+    name_items[name_idx + 4] = [["]]
+    name_idx = name_idx + 4
   end
-  return name .. "{" .. table.concat(label_parts, ",") .. "}"
+  name_items[name_idx + 1] = "}"
+  return concat(name_items, "", 1, name_idx + 1)
 end
+
+end -- do
 
 -- Construct bucket format for a list of buckets.
 --

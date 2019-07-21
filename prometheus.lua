@@ -397,10 +397,16 @@ function Prometheus.init(dict_name, prefix)
   return self
 end
 
+do
+    local ngx_log = ngx.log
+    local ngx_ERR = ngx.ERR
+
 function Prometheus:log_error(...)
   self.dict:incr("nginx_metric_errors_total", 1)
-  return ngx.log(ngx.ERR, ...)
+  return ngx_log(ngx_ERR, ...)
 end
+
+end -- do
 
 function Prometheus:log_error_kv(key, value, err)
   self:log_error(
@@ -419,7 +425,7 @@ end
 --   a Counter object.
 function Prometheus:counter(name, description, label_names)
   if not self.initialized then
-    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
+    self:log_error("Prometheus module has not been initialized")
     return
   end
 
@@ -452,7 +458,7 @@ end
 --   a Gauge object.
 function Prometheus:gauge(name, description, label_names)
   if not self.initialized then
-    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
+    self:log_error("Prometheus module has not been initialized")
     return
   end
 
@@ -486,7 +492,7 @@ end
 --   a Histogram object.
 function Prometheus:histogram(name, description, label_names, buckets)
   if not self.initialized then
-    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
+    self:log_error("Prometheus module has not been initialized")
     return
   end
 
@@ -619,7 +625,7 @@ end
 --   Prometheus.
 function Prometheus:metric_data()
   if not self.initialized then
-    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
+    self:log_error("Prometheus module has not been initialized")
     return
   end
 

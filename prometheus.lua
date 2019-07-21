@@ -402,7 +402,9 @@ do
     local ngx_ERR = ngx.ERR
 
 function Prometheus:log_error(...)
-  self.dict:incr("nginx_metric_errors_total", 1)
+  if self.dict then
+    self.dict:incr("nginx_metric_errors_total", 1)
+  end
   return ngx_log(ngx_ERR, ...)
 end
 

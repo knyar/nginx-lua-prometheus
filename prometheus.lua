@@ -398,8 +398,8 @@ function Prometheus.init(dict_name, prefix)
 end
 
 function Prometheus:log_error(...)
-  ngx.log(ngx.ERR, ...)
   self.dict:incr("nginx_metric_errors_total", 1)
+  return ngx.log(ngx.ERR, ...)
 end
 
 function Prometheus:log_error_kv(key, value, err)

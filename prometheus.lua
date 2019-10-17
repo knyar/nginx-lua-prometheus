@@ -1,3 +1,4 @@
+--- @module Prometheus
 -- vim: ts=2:sw=2:sts=2:expandtab
 --
 -- This module uses a single dictionary shared between Nginx workers to keep
@@ -43,7 +44,10 @@
 local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
                          0.4, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5, 10}
 
--- Metric is a "parent class" for all metrics.
+----
+--- @class Prometheus.Metric
+--- Metric is a "parent class" for all metrics.
+----
 local Metric = {}
 function Metric:new(o)
   o = o or {}
@@ -79,6 +83,7 @@ function Metric:check_label_values(label_values)
   end
 end
 
+--- @class Prometheus.Counter
 local Counter = Metric:new()
 -- Increase a given counter by `value`
 --
@@ -121,6 +126,7 @@ function Counter:reset()
   self.prometheus:reset(self.name)
 end
 
+--- @class Prometheus.Gauge
 local Gauge = Metric:new()
 -- Set a given gauge to `value`
 --
@@ -178,6 +184,7 @@ function Gauge:inc(value, label_values)
   self.prometheus:inc(self.name, self.label_names, label_values, value or 1)
 end
 
+--- @class Prometheus.Histogram
 local Histogram = Metric:new()
 -- Record a given value in a histogram.
 --

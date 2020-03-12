@@ -92,7 +92,7 @@ to the beginning of `nginx.conf` to ensure the modules are loaded.
 
 ### init()
 
-**syntax:** require("prometheus").init(*dict_name*, [*prefix*])
+**syntax:** require("prometheus").init(*dict_name*, [*prefix*, *sync_interval*])
 
 Initializes the module. This should be called once from the
 [init_by_lua](https://github.com/openresty/lua-nginx-module#init_by_lua)
@@ -101,6 +101,8 @@ section in nginx configuration.
 * `dict_name` is the name of the nginx shared dictionary which will be used to
   store all metrics. Defaults to `prometheus_metrics` if not specified.
 * `prefix` is an optional string which will be prepended to metric names on output
+* `sync_interval` is an optional number to specify `lua-resty-counter` sync interval
+in seconds. It's only effective when lua-resty-counter is installed and used.
 
 
 Returns a `prometheus` object that should be used to register metrics.
@@ -111,6 +113,13 @@ init_by_lua '
   prometheus = require("prometheus").init("prometheus_metrics")
 ';
 ```
+
+### init_worker()
+
+**syntax:** prometheus:init_worker()
+
+Initialize the per worker counter timer. Calling this in the `init_worker` phase
+is mandatory when `lua-resty-counter` is installed and used. 
 
 ### prometheus:counter()
 

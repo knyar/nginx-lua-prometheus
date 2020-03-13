@@ -141,14 +141,17 @@ local function check_metric_and_label_names(metric_name, label_names)
 end
 
 -- Makes a shallow copy of a table
-local function copy_table(table)
-  local new = {}
-  if table ~= nil then
-    for k, v in ipairs(table) do
-      new[k] = v
+local copy_table, perr = pcall(require, "table.clone")
+if perr then
+  copy_table = function(table)
+    local new = {}
+    if table ~= nil then
+      for k, v in ipairs(table) do
+        new[k] = v
+      end
     end
+    return new
   end
-  return new
 end
 
 -- Construct bucket format for a list of buckets.

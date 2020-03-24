@@ -27,7 +27,7 @@ of `nginx.conf`:
 
 ```
 lua_shared_dict prometheus_metrics 10M;
-lua_package_path "/path/to/nginx-lua-prometheus/?.lua";
+lua_package_path "/path/to/nginx-lua-prometheus/?.lua;;";
 init_by_lua '
   prometheus = require("prometheus").init("prometheus_metrics")
   metric_requests = prometheus:counter(

@@ -37,6 +37,9 @@ init_by_lua '
   metric_connections = prometheus:gauge(
     "nginx_http_connections", "Number of HTTP connections", {"state"})
 ';
+init_worker_by_lua '
+  prometheus.init_worker()
+';
 log_by_lua '
   metric_requests:inc(1, {ngx.var.server_name, ngx.var.status})
   metric_latency:observe(tonumber(ngx.var.request_time), {ngx.var.server_name})
@@ -431,3 +434,16 @@ server {
 ## License
 
 Licensed under MIT license.
+
+### Third Party License
+
+Following third party modules are used in this library:
+
+- [Kong/lua-resty-counter](https://github.com/Kong/lua-resty-counter)
+
+This module is licensed under the Apache 2.0 license.
+
+Copyright (C) 2019, Kong Inc.
+
+All rights reserved.
+

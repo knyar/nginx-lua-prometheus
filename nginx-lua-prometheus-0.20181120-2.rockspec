@@ -21,5 +21,6 @@ build = {
     type = "builtin",
     modules = {
         ["nginx.prometheus"] = "prometheus.lua"
+        ['resty_counter'] = 'vendor/resty_counter.lua'
     }
 }

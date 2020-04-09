@@ -39,14 +39,7 @@
 -- https://github.com/knyar/nginx-lua-prometheus
 -- Released under MIT license.
 
--- lua-resty-counter is optionally, if installed, it will optimize
--- performance espeically on multi-core machine, and reduce lock
--- competition between collect and counter increments
-local ok, resty_counter_lib
-ok, resty_counter_lib = pcall(require, "resty.counter")
-if not ok then
-  resty_counter_lib = nil
-end
+local resty_counter_lib = require("vendor.resty_counter")
 
 local Prometheus = {}
 local mt = { __index = Prometheus }
@@ -62,7 +55,7 @@ local TYPE_LITERAL = {
 local KEY_METRIC = mt -- dummy key for lookup
 
 -- the metrics name used for the client library itself
-local METRICS_NAME_ERRORS_TOTAL = "nginx_metric_errors_total"
+local ERROR_METRIC_NAME = "nginx_metric_errors_total"
 
 -- Default set of latency buckets, 5ms to 10s:
 local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
@@ -140,20 +133,6 @@ local function check_metric_and_label_names(metric_name, label_names)
   end
 end
 
--- Makes a shallow copy of a table
-local copy_table, perr = pcall(require, "table.clone")
-if perr then
-  copy_table = function(table)
-    local new = {}
-    if table ~= nil then
-      for k, v in ipairs(table) do
-        new[k] = v
-      end
-    end
-    return new
-  end
-end
-
 -- Construct bucket format for a list of buckets.
 --
 -- This receives a list of buckets and returns a sprintf template that should
@@ -196,7 +175,11 @@ local function lookup_or_create(self, label_values)
   end
   local t = self.lookup
   if label_values then
-    -- don't use ipairs here to avoid inner loop generates trace first
+    -- Don't use ipairs here to avoid inner loop generates trace first
+    -- Otherwise the inner for loop below is likely to get JIT compiled before
+    -- the outer loop which include `lookup_or_create`, in this case the trace
+    -- for outer loop will be aborted. By not using ipairs, we will be able to
+    -- compile longer traces as possible.
     local label
     for i=1,self.label_count do
       label = label_values[i]
@@ -268,10 +251,7 @@ local function inc(self, value, label_values)
     end
     self._counter = c
   end
-  _, err = c:incr(k, value, 0)
-  if err then
-    self._log_error(err)
-  end
+  c:incr(k, value, 0)
 end
 
 local function del(self, label_values)
@@ -281,15 +261,18 @@ local function del(self, label_values)
     self._log_error(err)
     return
   end
+
+  ngx.log(ngx.INFO, "waiting ", self.parent.sync_interval, "s for counter to sync")
+  ngx.sleep(self.parent.sync_interval)
   _, err = self._dict:delete(k)
   if err then
-    self._log_error(err)
+    self._log_error("Error deleting key: ".. k .. ": " .. err)
   end
 end
 
 local function set(self, value, label_values)
   if not value then
-    self._log_error("No value passed for " ..self.name)
+    self._log_error("No value passed for " .. self.name)
     return
   end
 
@@ -329,43 +312,29 @@ local function observe(self, value, label_values)
   end
   local _
   -- count
-  _, err = c:incr(keys[1], 1, 0)
-  if err then
-    self._log_error(err)
-  end
+  c:incr(keys[1], 1, 0)
 
   -- sum
-  _, err = c:incr(keys[2], value, 0)
-  if err then
-    self._log_error(err)
-  end
+  c:incr(keys[2], value, 0)
 
   local seen = false
   -- check in reverse order, otherwise we will always
   -- need to traverse the whole table.
   for i=self.bucket_count, 1, -1 do
     if value <= self.bucket[i] then
-      _, err = c:incr(keys[2+i], 1, 0)
-      if err then
-        self._log_error(err)
-      end
+      c:incr(keys[2+i], 1, 0)
       seen = true
     elseif seen then
       break
     end
   end
   -- inf
-  _, err = c:incr(keys[self.bucket_count+3], 1, 0)
-  if err then
-    self._log_error(err)
-  end
+  c:incr(keys[self.bucket_count+3], 1, 0)
 end
 
 local function reset(self)
-  if self.parent.resty_counter_used then
-    ngx.log(ngx.INFO, "waiting ", self.parent.sync_interval, "s for counter to sync")
-    ngx.sleep(self.parent.sync_interval)
-  end
+  ngx.log(ngx.INFO, "waiting ", self.parent.sync_interval, "s for counter to sync")
+  ngx.sleep(self.parent.sync_interval)
 
   local keys = self._dict:get_keys(0)
   local name_prefix = self.name .. "{"
@@ -401,9 +370,6 @@ function Prometheus.init(dict_name, prefix, sync_interval)
     error("Dictionary '" .. dict_name .. "' does not seem to exist. " ..
       "Please define the dictionary using `lua_shared_dict`.", 2)
   end
-  -- assume lua-resty-counter not exists, fall back to shdict, they share the same API
-  self._counter = self.dict
-  self.resty_counter_used = false
 
   if prefix then
     self.prefix = prefix
@@ -415,9 +381,9 @@ function Prometheus.init(dict_name, prefix, sync_interval)
 
   self.initialized = true
 
-  self:counter(METRICS_NAME_ERRORS_TOTAL,
+  self:counter(ERROR_METRIC_NAME,
     "Number of nginx-lua-prometheus errors")
-  self.dict:set(METRICS_NAME_ERRORS_TOTAL, 0)
+  self.dict:set(ERROR_METRIC_NAME, 0)
 
   -- sync interval for lua-resty-counter
   self.sync_interval = sync_interval or 1
@@ -425,17 +391,14 @@ function Prometheus.init(dict_name, prefix, sync_interval)
 end
 
 function Prometheus:init_worker()
-  if resty_counter_lib then
-    local counter_instance, err = resty_counter_lib.new(self.dict_name, self.sync_interval)
-    if err then
-      error(err, 2)
-    end
-    self._counter = counter_instance
-    self.resty_counter_used = true
+  local counter_instance, err = resty_counter_lib.new(self.dict_name, self.sync_interval)
+  if err then
+    error(err, 2)
   end
+  self._counter = counter_instance
 end
 
-local function register(self, name, help, label_names, bucket, typ)
+local function register(self, name, help, label_names, buckets, typ)
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")
     return
@@ -454,6 +417,7 @@ local function register(self, name, help, label_names, bucket, typ)
       self.registry[name] or self.registry[name_maybe_historgram]
     )) or
     (self.typ == TYPE_HISTOGRAM and (
+      self.registry[name] or
       self.registry[name .. "_count"] or
       self.registry[name .. "_sum"] or self.registry[name .. "_bucket"]
     )) then
@@ -469,6 +433,7 @@ local function register(self, name, help, label_names, bucket, typ)
     label_names = label_names,
     label_count = label_names and #label_names or 0,
     -- TODO: lru cache with auto ttl?
+    -- lookup is a tree of label values used to cache full metric names
     lookup = {},
     parent = self,
     -- store a reference for faster lookup
@@ -477,7 +442,6 @@ local function register(self, name, help, label_names, bucket, typ)
     _dict = self.dict,
     -- populate functions
     -- TODO: how does it compare with metatable lookup cpu/memory-ise?
-    del = del,
   }
   if typ < TYPE_HISTOGRAM then
     if typ == TYPE_GAUGE then
@@ -485,13 +449,12 @@ local function register(self, name, help, label_names, bucket, typ)
     end
     metric.inc = inc
     metric.reset = reset
+    metric.del = del
   else
     metric.observe = observe
-    metric.bucket = bucket or DEFAULT_BUCKETS
+    metric.bucket = buckets or DEFAULT_BUCKETS
     metric.bucket_count = #metric.bucket
     metric.bucket_format = construct_bucket_format(metric.bucket)
-    metric.label_names_bucket = copy_table(metric.label_names)
-    table.insert(metric.label_names_bucket, "le")
   end
 
   self.registry[name] = metric
@@ -521,11 +484,8 @@ function Prometheus:metric_data()
     return
   end
 
-  -- are we using lua-resty-counter ?
-  if self.resty_counter_used then
-    -- force a manual sync of counter local state to make integration test working
-    self._counter:sync()
-  end
+  -- force a manual sync of counter local state to make integration test working
+  self._counter:sync()
 
   local keys = self.dict:get_keys(0)
   -- Prometheus server expects buckets of a histogram to appear in increasing
@@ -576,7 +536,7 @@ end
 
 function Prometheus:log_error(...)
   ngx.log(ngx.ERR, ...)
-  self._counter:incr(METRICS_NAME_ERRORS_TOTAL, 1, 0)
+  self._counter:incr(ERROR_METRIC_NAME, 1, 0)
 end
 
 function Prometheus:log_error_kv(key, value, err)

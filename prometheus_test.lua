@@ -1,6 +1,5 @@
 -- vim: ts=2:sw=2:sts=2:expandtab
 luaunit = require('luaunit')
-prometheus = require('prometheus')
 
 -- Simple implementation of a nginx shared dictionary
 local SimpleDict = {}
@@ -37,6 +36,9 @@ end
 function SimpleDict:delete(k)
   self.dict[k] = nil
 end
+function SimpleDict:sync()
+  -- sync is needed to mock a resty-counter
+end
 
 -- Global nginx object
 local Nginx = {}
@@ -54,6 +56,9 @@ function Nginx.print(printed)
     table.insert(ngx.printed, str)
   end
 end
+function Nginx.sleep()
+  -- sleep is only needed to sync resty counter, we can just skip
+end
 
 -- Finds index of a given object in a table
 local function find_idx(table, element)
@@ -68,7 +73,9 @@ TestPrometheus = {}
 function TestPrometheus:setUp()
   self.dict = setmetatable({}, SimpleDict)
   ngx = setmetatable({shared={metrics=self.dict}}, Nginx)
-  self.p = prometheus.init("metrics")
+  self.p = require('prometheus').init("metrics")
+  -- Mock counter in non-resty test
+  self.p._counter = self.dict
   self.counter1 = self.p:counter("metric1", "Metric 1")
   self.counter2 = self.p:counter("metric2", "Metric 2", {"f2", "f1"})
   self.gauge1 = self.p:gauge("gauge1", "Gauge 1")
@@ -81,7 +88,7 @@ function TestPrometheus:testInit()
   luaunit.assertEquals(ngx.logs, nil)
 end
 function TestPrometheus:testErrorUnitialized()
-  local p = prometheus
+  local p = require('prometheus')
   p:counter("metric1")
   p:histogram("metric2")
   p:gauge("metric3")
@@ -90,7 +97,7 @@ function TestPrometheus:testErrorUnitialized()
   luaunit.assertEquals(#ngx.logs, 4)
 end
 function TestPrometheus:testErrorUnknownDict()
-  local pok, perr = pcall(prometheus.init, "nonexistent")
+  local pok, perr = pcall(require('prometheus').init, "nonexistent")
   luaunit.assertEquals(pok, false)
   luaunit.assertStrContains(perr, "does not seem to exist")
 end
@@ -129,9 +136,12 @@ function TestPrometheus:testErrorDuplicateMetrics()
   self.p:gauge("metric1", "Conflicts with Metric 1")
   self.p:histogram("l1", "Conflicts with Histogram 1")
   self.p:histogram("metric2", "Conflicts with Metric 2")
+  self.p:histogram("l1_count", "Conflicts with Histogram 1")
+  self.p:histogram("l1_sum", "Conflicts with Histogram 1")
+  self.p:histogram("l1_bucket", "Conflicts with Histogram 1")
 
-  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 7)
-  luaunit.assertEquals(#ngx.logs, 7)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 10)
+  luaunit.assertEquals(#ngx.logs, 10)
 end
 function TestPrometheus:testErrorNegativeValue()
   self.counter1:inc(-5)
@@ -458,7 +468,9 @@ function TestPrometheus:testCollect()
 end
 
 function TestPrometheus:testCollectWithPrefix()
-  local p = prometheus.init("metrics", "test_pref_")
+  local p = require('prometheus').init("metrics", "test_pref_")
+  -- Mock counter in non-resty test
+  p._counter = self.dict
   local counter1 = p:counter("metric1", "Metric 1")
   local gauge1 = p:gauge("gauge1", "Gauge 1")
   local hist1 = p:histogram("b1", "Bytes", {"var"}, {100, 2000})

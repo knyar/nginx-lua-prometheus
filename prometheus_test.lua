@@ -73,6 +73,7 @@ TestPrometheus = {}
 function TestPrometheus:setUp()
   self.dict = setmetatable({}, SimpleDict)
   ngx = setmetatable({shared={metrics=self.dict}}, Nginx)
+  package.loaded["prometheus.resty_counter"] = require("vendor.resty_counter")
   self.p = require('prometheus').init("metrics")
   -- Mock counter in non-resty test
   self.p._counter = self.dict

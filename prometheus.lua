@@ -39,7 +39,7 @@
 -- https://github.com/knyar/nginx-lua-prometheus
 -- Released under MIT license.
 
-local resty_counter_lib = require("vendor.resty_counter")
+local resty_counter_lib = require("prometheus.resty_counter")
 
 local Prometheus = {}
 local mt = { __index = Prometheus }
@@ -234,7 +234,7 @@ local function inc(self, value, label_values)
     return
   end
 
-  local k, _, err
+  local k, err
   k, err = lookup_or_create(self, label_values)
   if err then
     self._log_error(err)
@@ -310,7 +310,7 @@ local function observe(self, value, label_values)
     end
     self._counter = c
   end
-  local _
+
   -- count
   c:incr(keys[1], 1, 0)
 

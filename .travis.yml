@@ -40,4 +40,4 @@ script:
   - lua -lluacov prometheus_test.lua
 
 after_success:
-  - luacov-coveralls --include %./prometheus.lua
+  - luacov-coveralls --include %./prometheus.lua --include %./prometheus_resty_counter.lua

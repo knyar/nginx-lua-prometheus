@@ -20,6 +20,7 @@ dependencies = {
 build = {
     type = "builtin",
     modules = {
-        ["nginx.prometheus"] = "prometheus.lua"
+        ["prometheus"] = "prometheus.lua",
+        ["prometheus.resty_counter"] = 'vendor/resty_counter.lua'
     }
 }

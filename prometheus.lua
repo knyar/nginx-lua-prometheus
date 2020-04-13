@@ -1,6 +1,6 @@
 --- @module Prometheus
--- vim: ts=2:sw=2:sts=2:expandtab
 --
+-- vim: ts=2:sw=2:sts=2:expandtab
 -- This module uses a single dictionary shared between Nginx workers to keep
 -- all metrics. Each counter is stored as a separate entry in that dictionary,
 -- which allows us to increment them using built-in `incr` method.
@@ -39,175 +39,27 @@
 -- https://github.com/knyar/nginx-lua-prometheus
 -- Released under MIT license.
 
+local resty_counter_lib = require("prometheus.resty_counter")
+
+local Prometheus = {}
+local mt = { __index = Prometheus }
+
+local TYPE_COUNTER    = 0x1
+local TYPE_GAUGE      = 0x2
+local TYPE_HISTOGRAM  = 0x4
+local TYPE_LITERAL = {
+  [TYPE_COUNTER]   = "counter",
+  [TYPE_GAUGE]     = "gauge",
+  [TYPE_HISTOGRAM] = "histogram",
+}
+local KEY_METRIC = mt -- dummy key for lookup
+
+-- the metrics name used for the client library itself
+local ERROR_METRIC_NAME = "nginx_metric_errors_total"
 
 -- Default set of latency buckets, 5ms to 10s:
 local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
                          0.4, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5, 10}
-
-----
---- @class Prometheus.Metric
---- Metric is a "parent class" for all metrics.
-----
-local Metric = {}
-function Metric:new(o)
-  o = o or {}
-  setmetatable(o, self)
-  self.__index = self
-  return o
-end
-
--- Checks that the right number of labels values have been passed.
---
--- Args:
---   label_values: an array of label values.
---
--- Returns:
---   an error message or nil
-function Metric:check_label_values(label_values)
-  if self.label_names == nil and label_values == nil then
-    return
-  elseif self.label_names == nil and label_values ~= nil then
-    return "Expected no labels for " .. self.name .. ", got " ..  #label_values
-  elseif label_values == nil and self.label_names ~= nil then
-    return "Expected " .. #self.label_names .. " labels for " ..
-           self.name .. ", got none"
-  elseif #self.label_names ~= #label_values then
-    return "Wrong number of labels for " .. self.name .. ". Expected " ..
-           #self.label_names .. ", got " .. #label_values
-  else
-    for i, k in ipairs(self.label_names) do
-      if label_values[i] == nil then
-        return "Unexpected nil value for label " .. k ..  " of " .. self.name
-      end
-    end
-  end
-end
-
---- @class Prometheus.Counter
-local Counter = Metric:new()
--- Increase a given counter by `value`
---
--- Args:
---   value: (number) a value to add to the counter. Defaults to 1 if skipped.
---   label_values: an array of label values. Can be nil (i.e. not defined) for
---     metrics that have no labels.
-function Counter:inc(value, label_values)
-  local err = self:check_label_values(label_values)
-  if err ~= nil then
-    self.prometheus:log_error(err)
-    return
-  end
-  if value ~= nil and value < 0 then
-    self.prometheus:log_error_kv(self.name, value, "Value should not be negative")
-    return
-  end
-
-  self.prometheus:inc(self.name, self.label_names, label_values, value or 1)
-end
-
--- Delete a given counter
---
--- Args:
---   label_values: an array of label values. Can be nil (i.e. not defined) for
---     metrics that have no labels.
-function Counter:del(label_values)
-  local err = self:check_label_values(label_values)
-  if err ~= nil then
-    self.prometheus:log_error(err)
-    return
-  end
-  self.prometheus:set(self.name, self.label_names, label_values, nil)
-end
-
--- Delete all metrics for this counter. If this counter have no labels, it is
---   just the same as Counter:del() function. If this counter have labels, it
---   will delete all the metrics with different label values.
-function Counter:reset()
-  self.prometheus:reset(self.name)
-end
-
---- @class Prometheus.Gauge
-local Gauge = Metric:new()
--- Set a given gauge to `value`
---
--- Args:
---   value: (number) a value to set the gauge to. Should be defined.
---   label_values: an array of label values. Can be nil (i.e. not defined) for
---     metrics that have no labels.
-function Gauge:set(value, label_values)
-  if value == nil then
-    self.prometheus:log_error("No value passed for " .. self.name)
-    return
-  end
-  local err = self:check_label_values(label_values)
-  if err ~= nil then
-    self.prometheus:log_error(err)
-    return
-  end
-  self.prometheus:set(self.name, self.label_names, label_values, value)
-end
-
--- Delete a given gauge
---
--- Args:
---   label_values: an array of label values. Can be nil (i.e. not defined) for
---     metrics that have no labels.
-function Gauge:del(label_values)
-  local err = self:check_label_values(label_values)
-  if err ~= nil then
-    self.prometheus:log_error(err)
-    return
-  end
-  self.prometheus:set(self.name, self.label_names, label_values, nil)
-end
-
--- Delete all metrics for this gauge. If this gauge have no labels, it is
---   just the same as Gauge:del() function. If this gauge have labels, it
---   will delete all the metrics with different label values.
-function Gauge:reset()
-  self.prometheus:reset(self.name)
-end
-
--- Increase a given gauge by `value`
---
--- Args:
---   value: (number) a value to add to the gauge (a negative value when you
---     need to decrease the value of the gauge). Defaults to 1 if skipped.
---   label_values: an array of label values. Can be nil (i.e. not defined) for
---     metrics that have no labels.
-function Gauge:inc(value, label_values)
-  local err = self:check_label_values(label_values)
-  if err ~= nil then
-    self.prometheus:log_error(err)
-    return
-  end
-  self.prometheus:inc(self.name, self.label_names, label_values, value or 1)
-end
-
---- @class Prometheus.Histogram
-local Histogram = Metric:new()
--- Record a given value in a histogram.
---
--- Args:
---   value: (number) a value to record. Should be defined.
---   label_values: an array of label values. Can be nil (i.e. not defined) for
---     metrics that have no labels.
-function Histogram:observe(value, label_values)
-  if value == nil then
-    self.prometheus:log_error("No value passed for " .. self.name)
-    return
-  end
-  local err = self:check_label_values(label_values)
-  if err ~= nil then
-    self.prometheus:log_error(err)
-    return
-  end
-  self.prometheus:histogram_observe(self.name, self.label_names, label_values, value)
-end
-
-local Prometheus = {}
-Prometheus.__index = Prometheus
-Prometheus.initialized = false
 
 -- Generate full metric name that includes all labels.
 --
@@ -230,6 +82,55 @@ local function full_metric_name(name, label_names, label_values)
     table.insert(label_parts, key .. '="' .. label_value .. '"')
   end
   return name .. "{" .. table.concat(label_parts, ",") .. "}"
+end
+
+-- Extract short metric name from the full one.
+--
+-- Args:
+--   full_name: (string) full metric name that can include labels.
+--
+-- Returns:
+--   (string) short metric name with no labels. For a `*_bucket` metric of
+--     histogram the _bucket suffix will be removed.
+local function short_metric_name(full_name)
+  local labels_start, _ = full_name:find("{")
+  if not labels_start then
+    -- no labels
+    return full_name
+  end
+  local suffix_idx, _ = full_name:find("_bucket{")
+  if suffix_idx and full_name:find("le=") then
+    -- this is a histogram metric
+    return full_name:sub(1, suffix_idx - 1)
+  end
+  -- this is not a histogram metric
+  return full_name:sub(1, labels_start - 1)
+end
+
+-- Check metric name and label names for correctness.
+--
+-- Regular expressions to validate metric and label names are
+-- documented in https://prometheus.io/docs/concepts/data_model/
+--
+-- Args:
+--   metric_name: (string) metric name.
+--   label_names: label names (array of strings).
+--
+-- Returns:
+--   Either an error string, or nil of no errors were found.
+local function check_metric_and_label_names(metric_name, label_names)
+  if not metric_name:match("^[a-zA-Z_:][a-zA-Z0-9_:]*$") then
+    return "Metric name '" .. metric_name .. "' is invalid"
+  end
+  for _, label_name in ipairs(label_names or {}) do
+    if label_name == "le" then
+      return "Invalid label name 'le' in " .. metric_name
+    end
+    if not label_name:match("^[a-zA-Z_][a-zA-Z0-9_]*$") then
+      return "Metric '" .. metric_name .. "' label name '" .. label_name ..
+             "' is invalid"
+    end
+  end
 end
 
 -- Construct bucket format for a list of buckets.
@@ -260,320 +161,316 @@ local function construct_bucket_format(buckets)
   return "%0" .. (max_order + max_precision + 1) .. "." .. max_precision .. "f"
 end
 
--- Extract short metric name from the full one.
---
--- Args:
---   full_name: (string) full metric name that can include labels.
---
--- Returns:
---   (string) short metric name with no labels. For a `*_bucket` metric of
---     histogram the _bucket suffix will be removed.
-local function short_metric_name(full_name)
-  local labels_start, _ = full_name:find("{")
-  if not labels_start then
-    -- no labels
-    return full_name
-  end
-  local suffix_idx, _ = full_name:find("_bucket{")
-  if suffix_idx and full_name:find("le=") then
-    -- this is a histogram metric
-    return full_name:sub(1, suffix_idx - 1)
-  end
-  -- this is not a histogram metric
-  return full_name:sub(1, labels_start - 1)
-end
+-- begins metrics functions
 
--- Makes a shallow copy of a table
-local function copy_table(table)
-  local new = {}
-  if table ~= nil then
-    for k, v in ipairs(table) do
-      new[k] = v
+local function lookup_or_create(self, label_values)
+  -- if user accidently put a `nil` in between, #label_values will
+  -- return the non-nil prefix of the list, thus we will
+  -- be able to catch that situation as well
+  local cnt = label_values and #label_values or 0
+  -- specially, if first element is nil, # will treat it as "non-empty"
+  if cnt ~= self.label_count or (self.label_count > 0 and not label_values[1]) then
+    return nil, string.format("inconsistent labels count, expected %d, got %d",
+                              self.label_count, cnt)
+  end
+  local t = self.lookup
+  if label_values then
+    -- Don't use ipairs here to avoid inner loop generates trace first
+    -- Otherwise the inner for loop below is likely to get JIT compiled before
+    -- the outer loop which include `lookup_or_create`, in this case the trace
+    -- for outer loop will be aborted. By not using ipairs, we will be able to
+    -- compile longer traces as possible.
+    local label
+    for i=1,self.label_count do
+      label = label_values[i]
+      if not t[label] then
+        t[label] = {}
+      end
+      t = t[label]
     end
   end
-  return new
+  local key = t[KEY_METRIC]
+  if key then
+    return key
+  end
+  -- the following will only run once per labels combination per worker
+  -- TODO: further optimize this?
+  if self.typ == TYPE_HISTOGRAM then
+    local formatted = full_metric_name("", self.label_names, label_values)
+    key = {
+      self.name .. "_count" .. formatted,
+      self.name .. "_sum" .. formatted,
+    }
+
+    local bucket_pref
+    if self.label_count > 0 then
+      -- strip last }
+      bucket_pref = self.name .. "_bucket" .. string.sub(formatted, 1, #formatted-1) .. ","
+    else
+      bucket_pref = self.name .. "_bucket{"
+    end
+
+    for i, buc in ipairs(self.bucket) do
+      key[i+2] = string.format("%sle=\"%s\"}", bucket_pref, self.bucket_format:format(buc))
+    end
+    -- Last bucket. Note, that the label value is "Inf" rather than "+Inf"
+    -- required by Prometheus. This is necessary for this bucket to be the last
+    -- one when all metrics are lexicographically sorted. "Inf" will get replaced
+    -- by "+Inf" in Prometheus:collect().
+    key[self.bucket_count+3] = string.format("%sle=\"Inf\"}", bucket_pref)
+  else
+    key = full_metric_name(self.name, self.label_names, label_values)
+  end
+  t[KEY_METRIC] = key
+  return key
 end
 
--- Check metric name and label names for correctness.
---
--- Regular expressions to validate metric and label names are
--- documented in https://prometheus.io/docs/concepts/data_model/
---
--- Args:
---   metric_name: (string) metric name.
---   label_names: label names (array of strings).
---
--- Returns:
---   Either an error string, or nil of no errors were found.
-local function check_metric_and_label_names(metric_name, label_names)
-  if not metric_name:match("^[a-zA-Z_:][a-zA-Z0-9_:]*$") then
-    return "Metric name '" .. metric_name .. "' is invalid"
+local ERR_MSG_COUNTER_NOT_INITIALIZED = "counter not initialied"
+
+local function inc(self, value, label_values)
+  -- counter is not allowed to decrease
+  if self.typ == TYPE_COUNTER and value and value < 0 then
+    self._log_error_kv(self.name, value, "Value should not be negative")
+    return
   end
-  for _, label_name in ipairs(label_names or {}) do
-    if label_name == "le" then
-      return "Invalid label name 'le' in " .. metric_name
+
+  local k, err
+  k, err = lookup_or_create(self, label_values)
+  if err then
+    self._log_error(err)
+    return
+  end
+  -- FIXME: counter is initialized in init_worker while metrics are initiliazed
+  -- in init phase
+  local c = self._counter
+  if not c then
+    c = self.parent._counter
+    if not c then
+      self._log_error(ERR_MSG_COUNTER_NOT_INITIALIZED)
+      return
     end
-    if not label_name:match("^[a-zA-Z_][a-zA-Z0-9_]*$") then
-      return "Metric '" .. metric_name .. "' label name '" .. label_name ..
-             "' is invalid"
-    end
+    self._counter = c
+  end
+  c:incr(k, value, 0)
+end
+
+local function del(self, label_values)
+  local k, _, err
+  k, err = lookup_or_create(self, label_values)
+  if err then
+    self._log_error(err)
+    return
+  end
+
+  ngx.log(ngx.INFO, "waiting ", self.parent.sync_interval, "s for counter to sync")
+  ngx.sleep(self.parent.sync_interval)
+  _, err = self._dict:delete(k)
+  if err then
+    self._log_error("Error deleting key: ".. k .. ": " .. err)
   end
 end
 
--- Initialize the module.
---
--- This should be called once from the `init_by_lua` section in nginx
--- configuration.
---
--- Args:
---   dict_name: (string) name of the nginx shared dictionary which will be
---     used to store all metrics
---   prefix: (optional string) if supplied, prefix is added to all
---   metric names on output
---
--- Returns:
---   an object that should be used to register metrics.
-function Prometheus.init(dict_name, prefix)
-  local self = setmetatable({}, Prometheus)
+local function set(self, value, label_values)
+  if not value then
+    self._log_error("No value passed for " .. self.name)
+    return
+  end
+
+  local k, _, err
+  k, err = lookup_or_create(self, label_values)
+  if err then
+    self._log_error(err)
+    return
+  end
+  _, err = self._dict:safe_set(k, value)
+  if err then
+    self._log_error_kv(k, value, err)
+  end
+end
+
+local function observe(self, value, label_values)
+  if not value then
+    self._log_error("No value passed for " .. self.name)
+    return
+  end
+
+  local keys, err = lookup_or_create(self, label_values)
+  if err then
+    self._log_error(err)
+    return
+  end
+  -- FIXME: counter is initialized in init_worker while metrics are initiliazed
+  -- in init phase
+  local c = self._counter
+  if not c then
+    c = self.parent._counter
+    if not c then
+      self._log_error(ERR_MSG_COUNTER_NOT_INITIALIZED)
+      return
+    end
+    self._counter = c
+  end
+
+  -- count
+  c:incr(keys[1], 1, 0)
+
+  -- sum
+  c:incr(keys[2], value, 0)
+
+  local seen = false
+  -- check in reverse order, otherwise we will always
+  -- need to traverse the whole table.
+  for i=self.bucket_count, 1, -1 do
+    if value <= self.bucket[i] then
+      c:incr(keys[2+i], 1, 0)
+      seen = true
+    elseif seen then
+      break
+    end
+  end
+  -- inf
+  c:incr(keys[self.bucket_count+3], 1, 0)
+end
+
+local function reset(self)
+  ngx.log(ngx.INFO, "waiting ", self.parent.sync_interval, "s for counter to sync")
+  ngx.sleep(self.parent.sync_interval)
+
+  local keys = self._dict:get_keys(0)
+  local name_prefix = self.name .. "{"
+  local name_prefix_length = #name_prefix
+
+  for _, key in ipairs(keys) do
+    local value, err = self._dict:get(key)
+    if value then
+      -- with out labels equal, or with labels and the part before { equals
+      if key == self.name or name_prefix == string.sub(key, 1, name_prefix_length) then
+        _, err = self._dict:safe_set(key, nil)
+        if err then
+          self._log_error("Error resetting '", key, "': ", err)
+        end
+      end
+    else
+      self._log_error("Error getting '", key, "': ", err)
+    end
+  end
+
+  -- clean up lookup table as well
+  self.lookup = {}
+end
+
+-- ends metrics functions
+
+function Prometheus.init(dict_name, prefix, sync_interval)
+  local self = setmetatable({}, mt)
   dict_name = dict_name or "prometheus_metrics"
+  self.dict_name = dict_name
   self.dict = ngx.shared[dict_name]
   if self.dict == nil then
-    ngx.log(ngx.ERR,
-      "Dictionary '", dict_name, "' does not seem to exist. ",
-      "Please define the dictionary using `lua_shared_dict`.")
-    return self
+    error("Dictionary '" .. dict_name .. "' does not seem to exist. " ..
+      "Please define the dictionary using `lua_shared_dict`.", 2)
   end
-  self.help = {}
+
   if prefix then
     self.prefix = prefix
   else
     self.prefix = ''
   end
-  self.type = {}
-  self.registered = {}
-  self.buckets = {}
-  self.bucket_format = {}
+
+  self.registry = {}
+
   self.initialized = true
 
-  self:counter("nginx_metric_errors_total",
+  self:counter(ERROR_METRIC_NAME,
     "Number of nginx-lua-prometheus errors")
-  self.dict:set("nginx_metric_errors_total", 0)
+  self.dict:set(ERROR_METRIC_NAME, 0)
+
+  -- sync interval for lua-resty-counter
+  self.sync_interval = sync_interval or 1
   return self
 end
 
-function Prometheus:log_error(...)
-  ngx.log(ngx.ERR, ...)
-  self.dict:incr("nginx_metric_errors_total", 1)
+function Prometheus:init_worker()
+  local counter_instance, err = resty_counter_lib.new(self.dict_name, self.sync_interval)
+  if err then
+    error(err, 2)
+  end
+  self._counter = counter_instance
 end
 
-function Prometheus:log_error_kv(key, value, err)
-  self:log_error(
-    "Error while setting '", key, "' to '", value, "': '", err, "'")
-end
-
--- Register a counter.
---
--- Args:
---   name: (string) name of the metric. Required.
---   description: (string) description of the metric. Will be used for the HELP
---     comment on the metrics page. Optional.
---   label_names: array of strings, defining a list of metrics. Optional.
---
--- Returns:
---   a Counter object.
-function Prometheus:counter(name, description, label_names)
+local function register(self, name, help, label_names, buckets, typ)
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")
     return
   end
 
   local err = check_metric_and_label_names(name, label_names)
-  if err ~= nil then
+  if err then
     self:log_error(err)
     return
   end
 
-  if self.registered[name] then
+  local name_maybe_historgram = name:gsub("_bucket$", "")
+                                    :gsub("_count$", "")
+                                    :gsub("_sum$", "")
+  if (self.typ ~= TYPE_HISTOGRAM and (
+      self.registry[name] or self.registry[name_maybe_historgram]
+    )) or
+    (self.typ == TYPE_HISTOGRAM and (
+      self.registry[name] or
+      self.registry[name .. "_count"] or
+      self.registry[name .. "_sum"] or self.registry[name .. "_bucket"]
+    )) then
+
     self:log_error("Duplicate metric " .. name)
     return
   end
-  self.registered[name] = true
-  self.help[name] = description
-  self.type[name] = "counter"
 
-  return Counter:new{name=name, label_names=label_names, prometheus=self}
-end
-
--- Register a gauge.
---
--- Args:
---   name: (string) name of the metric. Required.
---   description: (string) description of the metric. Will be used for the HELP
---     comment on the metrics page. Optional.
---   label_names: array of strings, defining a list of metrics. Optional.
---
--- Returns:
---   a Gauge object.
-function Prometheus:gauge(name, description, label_names)
-  if not self.initialized then
-    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
-    return
-  end
-
-  local err = check_metric_and_label_names(name, label_names)
-  if err ~= nil then
-    self:log_error(err)
-    return
-  end
-
-  if self.registered[name] then
-    self:log_error("Duplicate metric " .. name)
-    return
-  end
-  self.registered[name] = true
-  self.help[name] = description
-  self.type[name] = "gauge"
-
-  return Gauge:new{name=name, label_names=label_names, prometheus=self}
-end
-
--- Register a histogram.
---
--- Args:
---   name: (string) name of the metric. Required.
---   description: (string) description of the metric. Will be used for the HELP
---     comment on the metrics page. Optional.
---   label_names: array of strings, defining a list of metrics. Optional.
---   buckets: array if numbers, defining bucket boundaries. Optional.
---
--- Returns:
---   a Histogram object.
-function Prometheus:histogram(name, description, label_names, buckets)
-  if not self.initialized then
-    ngx.log(ngx.ERR, "Prometheus module has not been initialized")
-    return
-  end
-
-  local err = check_metric_and_label_names(name, label_names)
-  if err ~= nil then
-    self:log_error(err)
-    return
-  end
-
-  for _, suffix in ipairs({"", "_bucket", "_count", "_sum"}) do
-    if self.registered[name .. suffix] then
-      self:log_error("Duplicate metric " .. name .. suffix)
-      return
+  local metric = {
+    name = name,
+    help = help,
+    typ = typ,
+    label_names = label_names,
+    label_count = label_names and #label_names or 0,
+    -- TODO: lru cache with auto ttl?
+    -- lookup is a tree of label values used to cache full metric names
+    lookup = {},
+    parent = self,
+    -- store a reference for faster lookup
+    _log_error = function(...) self:log_error(...) end,
+    _log_error_kv = function(...) self:log_error_kv(...) end,
+    _dict = self.dict,
+    -- populate functions
+    -- TODO: how does it compare with metatable lookup cpu/memory-ise?
+  }
+  if typ < TYPE_HISTOGRAM then
+    if typ == TYPE_GAUGE then
+      metric.set = set
     end
-    self.registered[name .. suffix] = true
+    metric.inc = inc
+    metric.reset = reset
+    metric.del = del
+  else
+    metric.observe = observe
+    metric.bucket = buckets or DEFAULT_BUCKETS
+    metric.bucket_count = #metric.bucket
+    metric.bucket_format = construct_bucket_format(metric.bucket)
   end
-  self.help[name] = description
-  self.type[name] = "histogram"
 
-  self.buckets[name] = buckets or DEFAULT_BUCKETS
-  self.bucket_format[name] = construct_bucket_format(self.buckets[name])
-
-  return Histogram:new{name=name, label_names=label_names, prometheus=self}
+  self.registry[name] = metric
+  return metric
 end
 
--- Set a given dictionary key.
--- This overwrites existing values, so it should only be used when initializing
--- metrics or when explicitely overwriting the previous value of a metric.
-function Prometheus:set_key(key, value)
-  local ok, err = self.dict:safe_set(key, value)
-  if not ok then
-    self:log_error_kv(key, value, err)
-  end
+function Prometheus:counter(name, help, label_names)
+  return register(self, name, help, label_names, nil, TYPE_COUNTER)
 end
 
--- Increment a given metric by `value`.
---
--- Args:
---   name: (string) short metric name without any labels.
---   label_names: (array) a list of label keys.
---   label_values: (array) a list of label values.
---   value: (number) value to add (a negative value when you need to decrease
---     the value of the gauge). Optional, defaults to 1.
-function Prometheus:inc(name, label_names, label_values, value)
-  local key = full_metric_name(name, label_names, label_values)
-  if value == nil then value = 1 end
-
-  local newval, err = self.dict:incr(key, value)
-  if newval then
-    return
-  end
-  -- Yes, this looks like a race, so I guess we might under-report some values
-  -- when multiple workers simultaneously try to create the same metric.
-  -- Hopefully this does not happen too often (shared dictionary does not get
-  -- reset during configuation reload).
-  if err == "not found" then
-    self:set_key(key, value)
-    return
-  end
-  -- Unexpected error
-  self:log_error_kv(key, value, err)
+function Prometheus:gauge(name, help, label_names)
+  return register(self, name, help, label_names, nil, TYPE_GAUGE)
 end
 
--- Set the current value of a gauge to `value`
---
--- Args:
---   name: (string) short metric name without any labels.
---   label_names: (array) a list of label keys.
---   label_values: (array) a list of label values.
---   value: (number) the new value for the gauge.
-function Prometheus:set(name, label_names, label_values, value)
-  local key = full_metric_name(name, label_names, label_values)
-  self:set_key(key, value)
-end
-
--- Record a given value into a histogram metric.
---
--- Args:
---   name: (string) short metric name without any labels.
---   label_names: (array) a list of label keys.
---   label_values: (array) a list of label values.
---   value: (number) value to observe.
-function Prometheus:histogram_observe(name, label_names, label_values, value)
-  self:inc(name .. "_count", label_names, label_values, 1)
-  self:inc(name .. "_sum", label_names, label_values, value)
-
-  -- we are going to mutate arrays of label names and values, so create a copy.
-  local l_names = copy_table(label_names)
-  local l_values = copy_table(label_values)
-
-  -- Last bucket. Note, that the label value is "Inf" rather than "+Inf"
-  -- required by Prometheus. This is necessary for this bucket to be the last
-  -- one when all metrics are lexicographically sorted. "Inf" will get replaced
-  -- by "+Inf" in Prometheus:collect().
-  table.insert(l_names, "le")
-  table.insert(l_values, "Inf")
-  self:inc(name .. "_bucket", l_names, l_values, 1)
-
-  local label_count = #l_names
-  for _, bucket in ipairs(self.buckets[name]) do
-    if value <= bucket then
-      -- last label is now "le"
-      l_values[label_count] = self.bucket_format[name]:format(bucket)
-      self:inc(name .. "_bucket", l_names, l_values, 1)
-    end
-  end
-end
-
--- Delete all metrics in a gauge or counter. If this gauge or counter have labels, it
---   will delete all the metrics with different label values.
-function Prometheus:reset(name)
-  local keys = self.dict:get_keys(0)
-  for _, key in ipairs(keys) do
-    local value, err = self.dict:get(key)
-    if value then
-      local short_name = short_metric_name(key)
-      if name == short_name then
-        self:set_key(key, nil)
-      end
-    else
-      self:log_error("Error getting '", key, "': ", err)
-    end
-  end
+function Prometheus:histogram(name, help, label_names, buckets)
+  return register(self, name, help, label_names, buckets, TYPE_HISTOGRAM)
 end
 
 -- Prometheus compatible metric data as an array of strings.
@@ -587,6 +484,9 @@ function Prometheus:metric_data()
     return
   end
 
+  -- force a manual sync of counter local state to make integration test working
+  self._counter:sync()
+
   local keys = self.dict:get_keys(0)
   -- Prometheus server expects buckets of a histogram to appear in increasing
   -- numerical order of their label values.
@@ -599,13 +499,16 @@ function Prometheus:metric_data()
     if value then
       local short_name = short_metric_name(key)
       if not seen_metrics[short_name] then
-        if self.help[short_name] then
-          table.insert(output, string.format("# HELP %s%s %s\n",
-            self.prefix, short_name, self.help[short_name]))
-        end
-        if self.type[short_name] then
-          table.insert(output, string.format("# TYPE %s%s %s\n",
-            self.prefix, short_name, self.type[short_name]))
+        local m = self.registry[short_name]
+        if m then
+          if m.help then
+            table.insert(output, string.format("# HELP %s%s %s\n",
+            self.prefix, short_name, m.help))
+          end
+          if m.typ then
+            table.insert(output, string.format("# TYPE %s%s %s\n",
+              self.prefix, short_name, TYPE_LITERAL[m.typ]))
+          end
         end
         seen_metrics[short_name] = true
       end
@@ -629,6 +532,16 @@ end
 function Prometheus:collect()
   ngx.header.content_type = "text/plain"
   ngx.print(self:metric_data())
+end
+
+function Prometheus:log_error(...)
+  ngx.log(ngx.ERR, ...)
+  self._counter:incr(ERROR_METRIC_NAME, 1, 0)
+end
+
+function Prometheus:log_error_kv(key, value, err)
+  self:log_error(
+    "Error while setting '", key, "' to '", value, "': '", err, "'")
 end
 
 return Prometheus

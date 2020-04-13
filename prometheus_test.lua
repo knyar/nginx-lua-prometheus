@@ -10,13 +10,13 @@ function SimpleDict:set(k, v)
   return true, nil, false  -- success, err, forcible
 end
 function SimpleDict:safe_set(k, v)
-  if k:find("willnotfit") then
-    return nil, "no memory"
-  end
   self:set(k, v)
   return true, nil  -- ok, err
 end
 function SimpleDict:incr(k, v, init)
+  if k:find("willnotfit") then
+    return nil, "no memory"
+  end
   if not self.dict[k] then self.dict[k] = init end
   self.dict[k] = self.dict[k] + (v or 1)
   return self.dict[k], nil  -- newval, err
@@ -36,17 +36,16 @@ end
 function SimpleDict:delete(k)
   self.dict[k] = nil
 end
-function SimpleDict:sync()
-  -- sync is needed to mock a resty-counter
-end
 
 -- Global nginx object
 local Nginx = {}
 Nginx.__index = Nginx
 Nginx.ERR = {}
 Nginx.WARN = {}
+Nginx.DEBUG = {}
 Nginx.header = {}
 function Nginx.log(level, ...)
+  if level == ngx.DEBUG then return end
   if not ngx.logs then ngx.logs = {} end
   table.insert(ngx.logs, table.concat({...}, " "))
 end
@@ -56,9 +55,15 @@ function Nginx.print(printed)
     table.insert(ngx.printed, str)
   end
 end
-function Nginx.sleep()
-  -- sleep is only needed to sync resty counter, we can just skip
+Nginx.worker = {}
+function Nginx.worker.id()
+  return 'testworker'
 end
+function Nginx.sleep() end
+Nginx.timer = {}
+function Nginx.timer.every(_, _, _) end
+
+ngx = setmetatable({shared={}}, Nginx)
 
 -- Finds index of a given object in a table
 local function find_idx(table, element)
@@ -72,17 +77,18 @@ end
 TestPrometheus = {}
 function TestPrometheus:setUp()
   self.dict = setmetatable({}, SimpleDict)
-  ngx = setmetatable({shared={metrics=self.dict}}, Nginx)
-  package.loaded["prometheus.resty_counter"] = require("vendor.resty_counter")
-  self.p = require('prometheus').init("metrics")
-  -- Mock counter in non-resty test
-  self.p._counter = self.dict
+  ngx.shared.metrics = self.dict
+  self.p = require('prometheus').init('metrics')
+  self.p:init_worker()
   self.counter1 = self.p:counter("metric1", "Metric 1")
   self.counter2 = self.p:counter("metric2", "Metric 2", {"f2", "f1"})
   self.gauge1 = self.p:gauge("gauge1", "Gauge 1")
   self.gauge2 = self.p:gauge("gauge2", "Gauge 2", {"f2", "f1"})
   self.hist1 = self.p:histogram("l1", "Histogram 1")
   self.hist2 = self.p:histogram("l2", "Histogram 2", {"var", "site"})
+end
+function TestPrometheus:tearDown()
+  ngx.logs = nil
 end
 function TestPrometheus:testInit()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
@@ -102,17 +108,17 @@ function TestPrometheus:testErrorUnknownDict()
   luaunit.assertEquals(pok, false)
   luaunit.assertStrContains(perr, "does not seem to exist")
 end
--- we don't set initial value now, this test is skipped
--- function TestPrometheus:testErrorNoMemory()
---   local counter3 = self.p:counter("willnotfit")
---   self.counter1:inc(5)
---   counter3:inc(1)
+function TestPrometheus:testErrorNoMemory()
+  local gauge3 = self.p:gauge("willnotfit")
+  self.counter1:inc(5)
+  gauge3:inc(1)
 
---   luaunit.assertEquals(self.dict:get("metric1"), 5)
---   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
---   luaunit.assertEquals(self.dict:get("willnotfit"), nil)
---   luaunit.assertEquals(#ngx.logs, 1)
--- end
+  self.p._counter:sync()
+  luaunit.assertEquals(self.dict:get("metric1"), 5)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
+  luaunit.assertEquals(self.dict:get("willnotfit"), nil)
+  luaunit.assertEquals(#ngx.logs, 1)
+end
 function TestPrometheus:testErrorInvalidMetricName()
   local h = self.p:histogram("name with a space", "Histogram")
   local g = self.p:gauge("nonprintable\004characters", "Gauge")
@@ -147,6 +153,7 @@ end
 function TestPrometheus:testErrorNegativeValue()
   self.counter1:inc(-5)
 
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("metric1"), nil)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
   luaunit.assertEquals(#ngx.logs, 1)
@@ -162,6 +169,7 @@ function TestPrometheus:testErrorIncorrectLabels()
   self.hist2:observe(1, {nil, "label"})
   self.hist2:observe(1, {"label", nil})
 
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("metric1"), nil)
   luaunit.assertEquals(self.dict:get("l1_count"), nil)
   luaunit.assertEquals(self.dict:get("gauge1"), nil)
@@ -175,6 +183,7 @@ function TestPrometheus:testNumericLabelValues()
   self.gauge2:set(1, {0, 15.5})
   self.hist2:observe(1, {-3, 90000})
 
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get('metric2{f2="0",f1="15.5"}'), 1)
   luaunit.assertEquals(self.dict:get('gauge2{f2="0",f1="15.5"}'), 1)
   luaunit.assertEquals(self.dict:get('l2_sum{var="-3",site="90000"}'), 1)
@@ -185,6 +194,7 @@ function TestPrometheus:testNonPrintableLabelValues()
   self.gauge2:set(1, {"z\001", "\002"})
   self.hist2:observe(1, {"\166omg", "fooшbar"})
 
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get('metric2{f2="foo",f1="bazqux"}'), 1)
   luaunit.assertEquals(self.dict:get('gauge2{f2="z",f1=""}'), 1)
   luaunit.assertEquals(self.dict:get('l2_sum{var="omg",site="foobar"}'), 1)
@@ -195,6 +205,7 @@ function TestPrometheus:testNoValues()
   self.gauge1:set()  -- should produce an error
   self.hist1:observe()  -- should produce an error
 
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("metric1"), 1)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 2)
   luaunit.assertEquals(#ngx.logs, 2)
@@ -205,6 +216,7 @@ function TestPrometheus:testCounters()
   self.counter2:inc(1, {"v2", "v1"})
   self.counter2:inc(3, {"v2", "v1"})
 
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("metric1"), 5)
   luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="v1"}'), 4)
   luaunit.assertEquals(ngx.logs, nil)
@@ -268,6 +280,7 @@ function TestPrometheus:testGaugeDel()
 end
 function TestPrometheus:testCounterDel()
   self.counter1:inc(1)
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("metric1"), 1)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
@@ -276,6 +289,7 @@ function TestPrometheus:testCounterDel()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
   self.counter2:inc(1, {"f2value", "f1value"})
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get('metric2{f2="f2value",f1="f1value"}'), 1)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
@@ -320,6 +334,7 @@ function TestPrometheus:testReset()
   self.counter2:inc(1, {"v2", "v1"})
   self.counter2:inc(3, {"v2", "v2"})
 
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("metric1"), 5)
   luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="v1"}'), 1)
   luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="v2"}'), 3)
@@ -332,6 +347,7 @@ function TestPrometheus:testReset()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
   self.counter1:inc(4)
+  self.p._counter:sync()
   self.counter2:reset()
   luaunit.assertEquals(self.dict:get("metric1"), 4)
   luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="v1"}'), nil)
@@ -354,6 +370,7 @@ function TestPrometheus:testLatencyHistogram()
   self.hist2:observe(0.001, {"ok", "site1"})
   self.hist2:observe(0.15, {"ok", "site1"})
 
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get('l1_bucket{le="00.300"}'), nil)
   luaunit.assertEquals(self.dict:get('l1_bucket{le="00.400"}'), 2)
   luaunit.assertEquals(self.dict:get('l1_bucket{le="00.500"}'), 2)
@@ -376,6 +393,7 @@ function TestPrometheus:testLabelEscaping()
   self.hist2:observe(0.001, {"ok", "site\"1"})
   self.hist2:observe(0.15, {"ok", "site\"1"})
 
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="\\""}'), 1)
   luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="\\\\"}'), 5)
   luaunit.assertEquals(self.dict:get('gauge2{f2="v2",f1="\\""}'), 1)
@@ -394,6 +412,7 @@ function TestPrometheus:testCustomBucketer1()
   hist3:observe(2, {"ok"})
   hist3:observe(0.151, {"ok"})
 
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get('l1_bucket{le="00.300"}'), nil)
   luaunit.assertEquals(self.dict:get('l1_bucket{le="00.400"}'), 1)
   luaunit.assertEquals(self.dict:get('l3_bucket{var="ok",le="1.0"}'), 1)
@@ -412,6 +431,7 @@ function TestPrometheus:testCustomBucketer2()
   hist3:observe(7, {"ok"})
   hist3:observe(70000, {"ok"})
 
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get('l3_bucket{var="ok",le="00000.000005"}'), 1)
   luaunit.assertEquals(self.dict:get('l3_bucket{var="ok",le="00005.000000"}'), 2)
   luaunit.assertEquals(self.dict:get('l3_bucket{var="ok",le="50000.000000"}'), 3)
@@ -469,9 +489,11 @@ function TestPrometheus:testCollect()
 end
 
 function TestPrometheus:testCollectWithPrefix()
+  self.dict = setmetatable({}, SimpleDict)
+  ngx.shared.metrics = self.dict
   local p = require('prometheus').init("metrics", "test_pref_")
-  -- Mock counter in non-resty test
-  p._counter = self.dict
+  p:init_worker()
+
   local counter1 = p:counter("metric1", "Metric 1")
   local gauge1 = p:gauge("gauge1", "Gauge 1")
   local hist1 = p:histogram("b1", "Bytes", {"var"}, {100, 2000})

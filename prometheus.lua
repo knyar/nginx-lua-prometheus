@@ -39,7 +39,7 @@
 -- https://github.com/knyar/nginx-lua-prometheus
 -- Released under MIT license.
 
-local resty_counter_lib = require("prometheus.resty_counter")
+local resty_counter_lib = require("prometheus_resty_counter")
 
 local Prometheus = {}
 local mt = { __index = Prometheus }

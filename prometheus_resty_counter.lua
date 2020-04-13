@@ -1,13 +1,26 @@
---[[
-    Lock-free counter for OpenResty
-    Taken from https://github.com/Kong/lua-resty-counter
-    Vendored version is v0.2.0
-    Licensed under Apache 2.0
-]]--
 local ngx_shared = ngx.shared
+local pairs = pairs
+local ngx = ngx
+local error = error
+local setmetatable = setmetatable
+local tonumber = tonumber
 
+local clear_tab
+do
+  local ok
+  ok, clear_tab = pcall(require, "table.clear")
+  if not ok then
+    clear_tab = function(tab)
+      for k in pairs(tab) do
+        tab[k] = nil
+      end
+    end
+  end
+end
 
-local _M = {}
+local _M = {
+  _VERSION = '0.2.1'
+}
 local mt = { __index = _M }
 
 -- local cache of counters increments
@@ -21,13 +34,14 @@ local function sync(_, self)
   local err, _
   local ok = true
   for k, v in pairs(self.increments) do
-    self.increments[k] = nil
     _, err, _ = self.dict:incr(k, v, 0)
     if err then
       ngx.log(ngx.WARN, "error increasing counter in shdict key: ", k, ", err: ", err)
       ok = false
     end
   end
+
+  clear_tab(self.increments)
   return ok
 end
 

@@ -37,9 +37,7 @@ init_by_lua '
   metric_connections = prometheus:gauge(
     "nginx_http_connections", "Number of HTTP connections", {"state"})
 ';
-init_worker_by_lua '
-  prometheus.init_worker()
-';
+init_worker_by_lua 'prometheus:init_worker()';
 log_by_lua '
   metric_requests:inc(1, {ngx.var.server_name, ngx.var.status})
   metric_latency:observe(tonumber(ngx.var.request_time), {ngx.var.server_name})
@@ -103,9 +101,11 @@ section in nginx configuration.
 
 * `dict_name` is the name of the nginx shared dictionary which will be used to
   store all metrics. Defaults to `prometheus_metrics` if not specified.
-* `prefix` is an optional string which will be prepended to metric names on output
-* `sync_interval` is an optional number to specify `lua-resty-counter` sync interval
-in seconds. It's only effective when lua-resty-counter is installed and used.
+* `prefix` is an optional string which will be prepended to metric names on
+  output.
+* `sync_interval` is an optional number that sets `lua-resty-counter` sync
+  interval in seconds. This sets the boundary on eventual consistency of
+  counter metrics. Defaults to 1.
 
 
 Returns a `prometheus` object that should be used to register metrics.
@@ -121,8 +121,13 @@ init_by_lua '
 
 **syntax:** prometheus:init_worker()
 
-Initialize the per worker counter timer. Calling this in the `init_worker` phase
-is mandatory when `lua-resty-counter` is installed and used. 
+Initialize per-worker counters. This must be called from the
+`init_worker_by_lua` section of nginx configuration.
+
+Example:
+```
+init_worker_by_lua 'prometheus:init_worker()';
+```
 
 ### prometheus:counter()
 

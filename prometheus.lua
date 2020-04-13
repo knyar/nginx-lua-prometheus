@@ -227,9 +227,25 @@ end
 
 local ERR_MSG_COUNTER_NOT_INITIALIZED = "counter not initialied"
 
-local function inc(self, value, label_values)
+local function inc_gauge(self, value, label_values)
+  -- inc() for gauges operates on the dictionary directly to provide
+  -- strong ordering of inc() and set() operations.
+  local k, err, _
+  k, err = lookup_or_create(self, label_values)
+  if err then
+    self._log_error(err)
+    return
+  end
+
+  _, err, _ = self._dict:incr(k, value, 0)
+  if err then
+    self._log_error_kv(k, value, err)
+  end
+end
+
+local function inc_counter(self, value, label_values)
   -- counter is not allowed to decrease
-  if self.typ == TYPE_COUNTER and value and value < 0 then
+  if value and value < 0 then
     self._log_error_kv(self.name, value, "Value should not be negative")
     return
   end
@@ -240,8 +256,7 @@ local function inc(self, value, label_values)
     self._log_error(err)
     return
   end
-  -- FIXME: counter is initialized in init_worker while metrics are initiliazed
-  -- in init phase
+
   local c = self._counter
   if not c then
     c = self.parent._counter
@@ -251,7 +266,7 @@ local function inc(self, value, label_values)
     end
     self._counter = c
   end
-  c:incr(k, value, 0)
+  c:incr(k, value)
 end
 
 local function del(self, label_values)
@@ -262,8 +277,13 @@ local function del(self, label_values)
     return
   end
 
-  ngx.log(ngx.INFO, "waiting ", self.parent.sync_interval, "s for counter to sync")
-  ngx.sleep(self.parent.sync_interval)
+  -- Gauge metrics don't use per-worker counters, so for gauges we don't need to wait for
+  -- the counter to sync sync.
+  if self.typ ~= TYPE_GAUGE then
+    ngx.log(ngx.INFO, "waiting ", self.parent.sync_interval, "s for counter to sync")
+    ngx.sleep(self.parent.sync_interval)
+  end
+
   _, err = self._dict:delete(k)
   if err then
     self._log_error("Error deleting key: ".. k .. ": " .. err)
@@ -299,8 +319,6 @@ local function observe(self, value, label_values)
     self._log_error(err)
     return
   end
-  -- FIXME: counter is initialized in init_worker while metrics are initiliazed
-  -- in init phase
   local c = self._counter
   if not c then
     c = self.parent._counter
@@ -312,29 +330,33 @@ local function observe(self, value, label_values)
   end
 
   -- count
-  c:incr(keys[1], 1, 0)
+  c:incr(keys[1], 1)
 
   -- sum
-  c:incr(keys[2], value, 0)
+  c:incr(keys[2], value)
 
   local seen = false
   -- check in reverse order, otherwise we will always
   -- need to traverse the whole table.
   for i=self.bucket_count, 1, -1 do
     if value <= self.bucket[i] then
-      c:incr(keys[2+i], 1, 0)
+      c:incr(keys[2+i], 1)
       seen = true
     elseif seen then
       break
     end
   end
   -- inf
-  c:incr(keys[self.bucket_count+3], 1, 0)
+  c:incr(keys[self.bucket_count+3], 1)
 end
 
 local function reset(self)
-  ngx.log(ngx.INFO, "waiting ", self.parent.sync_interval, "s for counter to sync")
-  ngx.sleep(self.parent.sync_interval)
+  -- Gauge metrics don't use per-worker counters, so for gauges we don't need to wait for
+  -- the counter to sync sync.
+  if self.typ ~= TYPE_GAUGE then
+    ngx.log(ngx.INFO, "waiting ", self.parent.sync_interval, "s for counter to sync")
+    ngx.sleep(self.parent.sync_interval)
+  end
 
   local keys = self._dict:get_keys(0)
   local name_prefix = self.name .. "{"
@@ -446,8 +468,10 @@ local function register(self, name, help, label_names, buckets, typ)
   if typ < TYPE_HISTOGRAM then
     if typ == TYPE_GAUGE then
       metric.set = set
+      metric.inc = inc_gauge
+    else
+      metric.inc = inc_counter
     end
-    metric.inc = inc
     metric.reset = reset
     metric.del = del
   else

@@ -560,7 +560,7 @@ end
 
 function Prometheus:log_error(...)
   ngx.log(ngx.ERR, ...)
-  self._counter:incr(ERROR_METRIC_NAME, 1, 0)
+  self.dict:incr(ERROR_METRIC_NAME, 1, 0)
 end
 
 function Prometheus:log_error_kv(key, value, err)

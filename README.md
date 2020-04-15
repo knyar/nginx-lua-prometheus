@@ -433,9 +433,14 @@ server {
 
 ## Credits
 
-- Created and maintained by Anton Tolchanov (@knyar)
-- Metrix prefix support contributed by david birdsong (@davidbirdsong)
-- Gauge support contributed by Cosmo Petrich (@cosmopetrich)
+- Created and maintained by Anton Tolchanov ([@knyar](https://github.com/knyar))
+- Metrix prefix support contributed by david birdsong ([@davidbirdsong](
+  https://github.com/davidbirdsong))
+- Gauge support contributed by Cosmo Petrich ([@cosmopetrich](
+  https://github.com/cosmopetrich))
+- Performance improvements and per-worker counters are contributed by Wangchong
+  Zhou ([@fffonion](https://github.com/fffonion)) / [@Kong](
+  https://github.com/Kong).
 
 ## License
 

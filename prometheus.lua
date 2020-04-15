@@ -462,11 +462,10 @@ end
 --     used to store all metrics
 --   prefix: (optional string) if supplied, prefix is added to all
 --     metric names on output
---   sync_interval: per-worker counter sync interval (in seconds).
 --
 -- Returns:
 --   an object that should be used to register metrics.
-function Prometheus.init(dict_name, prefix, sync_interval)
+function Prometheus.init(dict_name, prefix)
   local self = setmetatable({}, mt)
   dict_name = dict_name or "prometheus_metrics"
   self.dict_name = dict_name
@@ -488,8 +487,6 @@ function Prometheus.init(dict_name, prefix, sync_interval)
 
   self:counter(ERROR_METRIC_NAME, "Number of nginx-lua-prometheus errors")
   self.dict:set(ERROR_METRIC_NAME, 0)
-
-  self.sync_interval = sync_interval or 1
   return self
 end
 
@@ -497,7 +494,11 @@ end
 --
 -- This should be called once from the `init_worker_by_lua` section in nginx
 -- configuration.
-function Prometheus:init_worker()
+--
+-- Args:
+--   sync_interval: per-worker counter sync interval (in seconds).
+function Prometheus:init_worker(sync_interval)
+  self.sync_interval = sync_interval or 1
   local counter_instance, err = resty_counter_lib.new(
       self.dict_name, self.sync_interval)
   if err then

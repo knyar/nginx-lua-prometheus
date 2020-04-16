@@ -403,6 +403,7 @@ server {
 
 - `luacheck --globals ngx -- prometheus.lua`
 - `lua prometheus_test.lua`
+- `cd integration && ./test.sh` (requires Docker)
 
 ### Releasing new version
 

@@ -1,14 +1,29 @@
 # Stolen from https://github.com/daurnimator/luatz/blob/master/.travis.yml
-language: python
-
 sudo: false
+notifications:
+  email:
+    on_success: change
+    on_failure: always
 
-env:
-  matrix:
-    - LUA="lua 5.1"
-    - LUA="lua 5.2"
-    - LUA="lua 5.3"
+jobs:
+  include:
+    - language: golang
+      go: "1.14"
+      services:
+        - docker
+      before_install:
+        - cd integration && go get
+      script:
+        - ./test.sh
+      after_success: []
+    - env:
+      - LUA="lua 5.1"
+    - env:
+      - LUA="lua 5.2"
+    - env:
+      - LUA="lua 5.3"
 
+language: python
 before_install:
   - pip install hererocks
   - hererocks here -r^ --$LUA # Install latest LuaRocks version
@@ -26,8 +41,3 @@ script:
 
 after_success:
   - luacov-coveralls --include %./prometheus.lua
-
-notifications:
-  email:
-    on_success: change
-    on_failure: always

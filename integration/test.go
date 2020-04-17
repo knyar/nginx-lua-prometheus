@@ -81,7 +81,7 @@ func main() {
 	flag.Parse()
 
 	// Use a custom http client with a lower idle connection timeout.
-	client := &http.Client{Transport: &http.Transport{IdleConnTimeout: time.Second}}
+	client := &http.Client{Transport: &http.Transport{IdleConnTimeout: 400 * time.Millisecond}}
 
 	log.Printf("Starting the test with %d concurrent clients", *concurrency)
 	var wg sync.WaitGroup
@@ -130,9 +130,9 @@ func main() {
 	total := fast + slow + errors
 	log.Printf("Sent %d requests (%d fast, %d slow, %d errors)", total, fast, slow, errors)
 
-	// Sleep for 1.5 seconds before collecting metrics. This is to ensure that all HTTP connections
+	// Sleep for 500ms before collecting metrics. This is to ensure that all HTTP connections
 	// to nginx get closed, and to allow for some eventual consistency in nginx-lua-prometheus.
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	resp, err := client.Get("http://localhost:18001/metrics")
 	if err != nil {

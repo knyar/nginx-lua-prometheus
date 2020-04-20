@@ -1,7 +1,7 @@
 -- Note, this file must have version in its name
 -- (see https://github.com/knyar/nginx-lua-prometheus/issues/27)
 package = "nginx-lua-prometheus"
-version = "0.20181120-2"
+version = "0.20200420-1"
 
 source = {
   url = "git://github.com/knyar/nginx-lua-prometheus.git"
@@ -21,6 +21,6 @@ build = {
     type = "builtin",
     modules = {
         ["prometheus"] = "prometheus.lua",
-        ["prometheus.resty_counter"] = 'vendor/resty_counter.lua'
+        ["prometheus_resty_counter"] = 'prometheus_resty_counter.lua'
     }
 }

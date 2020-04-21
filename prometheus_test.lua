@@ -13,6 +13,13 @@ function SimpleDict:safe_set(k, v)
   self:set(k, v)
   return true, nil  -- ok, err
 end
+function SimpleDict:safe_add(k, v)
+  if k == "willnotfit" then
+    return nil, "no memory"
+  end
+  self:set(k, v)
+  return true, nil  -- ok, err
+end
 function SimpleDict:incr(k, v, init)
   if k:find("willnotfit") then
     return nil, "no memory"
@@ -27,11 +34,6 @@ function SimpleDict:get(k)
     return nil, 0
   end
   return self.dict[k], 0  -- value, flags
-end
-function SimpleDict:get_keys(k)
-  local keys = {}
-  for key in pairs(self.dict) do table.insert(keys, key) end
-  return keys
 end
 function SimpleDict:delete(k)
   self.dict[k] = nil
@@ -91,6 +93,7 @@ function TestPrometheus:tearDown()
   ngx.logs = nil
 end
 function TestPrometheus:testInit()
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
   luaunit.assertEquals(ngx.logs, nil)
 end
@@ -124,6 +127,7 @@ function TestPrometheus:testErrorInvalidMetricName()
   local g = self.p:gauge("nonprintable\004characters", "Gauge")
   local c = self.p:counter("0startswithadigit", "Counter")
 
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 3)
   luaunit.assertEquals(#ngx.logs, 3)
 end
@@ -132,6 +136,7 @@ function TestPrometheus:testErrorInvalidLabels()
   local g = self.p:gauge("count1", "Gauge", {"le"})
   local c = self.p:counter("count1", "Counter", {"foo\002"})
 
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 3)
   luaunit.assertEquals(#ngx.logs, 3)
 end
@@ -147,6 +152,7 @@ function TestPrometheus:testErrorDuplicateMetrics()
   self.p:histogram("l1_sum", "Conflicts with Histogram 1")
   self.p:histogram("l1_bucket", "Conflicts with Histogram 1")
 
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 10)
   luaunit.assertEquals(#ngx.logs, 10)
 end
@@ -223,6 +229,7 @@ function TestPrometheus:testCounters()
 end
 function TestPrometheus:testGaugeIncDec()
   self.gauge1:inc(-1)
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("gauge1"), -1)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
@@ -253,12 +260,14 @@ function TestPrometheus:testGaugeIncDec()
 
   self.gauge1:inc(1, {"should-be-no-labels"})
   self.gauge2:inc(1, {"too-few-labels"})
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("gauge1"), 3)
   luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), -1)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 2)
 end
 function TestPrometheus:testGaugeDel()
   self.gauge1:inc(1)
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("gauge1"), 1)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
@@ -271,6 +280,7 @@ function TestPrometheus:testGaugeDel()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
   self.gauge2:del({"f2value"})
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), 1)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
 
@@ -294,6 +304,7 @@ function TestPrometheus:testCounterDel()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
   self.counter2:del()
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get('metric2{f2="f2value",f1="f1value"}'), 1)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
 
@@ -303,6 +314,7 @@ function TestPrometheus:testCounterDel()
 end
 function TestPrometheus:testReset()
   self.gauge1:inc(1)
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("gauge1"), 1)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
@@ -361,6 +373,7 @@ function TestPrometheus:testReset()
   -- error get from dict
   self.gauge2:inc(4, {"dict_error", "dict_error"})
   self.gauge2:reset()
+  self.p._counter:sync()
   luaunit.assertEquals(self.dict:get('gauge2{f2="dict_error",f1="dict_error"}'), nil)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
 end

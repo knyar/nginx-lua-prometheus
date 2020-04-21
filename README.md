@@ -368,21 +368,6 @@ to configure an alert on that metric.
 
 ## Caveats
 
-### Large number of metrics
-
-Please keep in mind that all metrics stored by this library are kept in a
-single shared dictionary (`lua_shared_dict`). While exposing metrics the module
-has to list all dictionary keys, which has serious performance implications for
-dictionaries with large number of keys (in this case this means large number
-of metrics OR metrics with high label cardinality). Listing the keys has to
-lock the dictionary, which blocks all threads that try to access it (i.e.
-potentially all nginx worker threads).
-
-There is no elegant solution to this issue (besides keeping metrics in a
-separate storage system external to nginx), so for latency-critical servers you
-might want to keep the number of metrics (and distinct metric label values) to
-a minimum.
-
 ### Usage in stream module
 
 For now, there is no way to share a dictionary between HTTP and Stream modules
@@ -420,7 +405,7 @@ server {
 
 - `luacheck --globals ngx -- prometheus.lua`
 - `lua prometheus_test.lua`
-- `cd integration && ./test.sh` (requires Docker)
+- `cd integration && ./test.sh` (requires Docker and Go)
 
 ### Releasing new version
 

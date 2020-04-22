@@ -328,8 +328,14 @@ local function del(self, label_values)
     return
   end
 
-  -- Gauge metrics don't use per-worker counters, so for gauges we don't need to wait for
-  -- the counter to sync.
+  -- `del` might be called immediately after a configuration change that stops a
+  -- given metric from being used, so we cannot guarantee that other workers
+  -- don't have unflushed counter values for a metric that is about to be
+  -- deleted. We wait for `sync_interval` here to ensure that those values are
+  -- synced (and deleted from worker-local counters) before a given metric is
+  -- removed.
+  -- Gauge metrics don't use per-worker counters, so for gauges we don't need to
+  -- wait for the counter to sync.
   if self.typ ~= TYPE_GAUGE then
     ngx.log(ngx.INFO, "waiting ", self.parent.sync_interval, "s for counter to sync")
     ngx.sleep(self.parent.sync_interval)
@@ -422,8 +428,10 @@ end
 -- Args:
 --   self: a `metric` object, created by register().
 local function reset(self)
-  -- Gauge metrics don't use per-worker counters, so for gauges we don't need to wait for
-  -- the counter to sync.
+  -- Wait for other worker threads to sync their counters before removing the
+  -- metric (please see `del` for a more detailed comment).
+  -- Gauge metrics don't use per-worker counters, so for gauges we don't need to
+  -- wait for the counter to sync.
   if self.typ ~= TYPE_GAUGE then
     ngx.log(ngx.INFO, "waiting ", self.parent.sync_interval, "s for counter to sync")
     ngx.sleep(self.parent.sync_interval)

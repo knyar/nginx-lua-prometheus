@@ -265,10 +265,10 @@ log_by_lua '
 
 **syntax:** counter:del(*label_values*)
 
-Delete a previously registered counter. This is usually called when you don't 
-need to observe such counter (or a metric with specific label values in this 
-counter) any more. If this counter has labels, you have to pass `label_values` 
-to delete the specific metric of this counter. If you want to delete all the 
+Delete a previously registered counter. This is usually called when you don't
+need to observe such counter (or a metric with specific label values in this
+counter) any more. If this counter has labels, you have to pass `label_values`
+to delete the specific metric of this counter. If you want to delete all the
 metrics of a counter with labels, you should call `Counter:reset()`.
 
 * `label_values` is an array of label values.
@@ -278,13 +278,19 @@ the counter was registered using `prometheus:counter()`. No label values should
 be provided for counters with no labels. Non-printable characters will be
 stripped from label values.
 
+This function will wait for `sync_interval` before deleting the metric to
+allow all workers to sync their counters.
+
 ### counter:reset()
 
 **syntax:** counter:reset()
 
-Delete all metrics for a previously registered counter. If this counter have no 
-labels, it is just the same as `Counter:del()` function. If this counter have labels, 
+Delete all metrics for a previously registered counter. If this counter have no
+labels, it is just the same as `Counter:del()` function. If this counter have labels,
 it will delete all the metrics with different label values.
+
+This function will wait for `sync_interval` before deleting the metrics to
+allow all workers to sync their counters.
 
 ### gauge:set()
 

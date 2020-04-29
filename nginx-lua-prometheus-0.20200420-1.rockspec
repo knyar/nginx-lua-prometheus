@@ -4,7 +4,8 @@ package = "nginx-lua-prometheus"
 version = "0.20200420-1"
 
 source = {
-  url = "git://github.com/knyar/nginx-lua-prometheus.git"
+  url = "git://github.com/knyar/nginx-lua-prometheus.git",
+  tag = "0.20200420"
 }
 
 description = {

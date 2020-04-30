@@ -15,6 +15,7 @@ function KeyIndex.new(shared_dict, prefix)
   self.dict = shared_dict
   self.key_prefix = prefix .. "key_"
   self.key_count = prefix .. "key_count"
+  self.last = 0
   self.keys = {}
   self.index = {}
   self.lock = lock_lib.new(prefix .. "lock_keys", self.dict)
@@ -25,8 +26,8 @@ end
 function KeyIndex:sync()
   local N = self.dict:get(self.key_count) or 0
   -- Only sync if there are some new keys.
-  if N ~= #self.keys then
-    for i = #self.keys, N do
+  if N ~= self.last then
+    for i = self.last, N do
       -- Read i-th key. If it is nil, it means it was deleted by some other thread.
       local key = self.dict:get(self.key_prefix .. i)
       if key then
@@ -67,6 +68,7 @@ function KeyIndex:add(key_or_keys)
         self.dict:safe_add(self.key_prefix .. N, key)
         self.keys[N] = key
         self.index[key] = N
+        self.last = N
       end
     end
     self.dict:safe_set(self.key_count, N)

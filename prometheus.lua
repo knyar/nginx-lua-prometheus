@@ -432,7 +432,7 @@ local function reset(self)
     ngx.sleep(self.parent.sync_interval)
   end
 
-  local keys = self._key_index:get()
+  local keys = self._key_index:list()
   local name_prefix = self.name .. "{"
   local name_prefix_length = #name_prefix
 
@@ -625,7 +625,7 @@ function Prometheus:metric_data()
   -- Force a manual sync of counter local state (mostly to make tests work).
   self._counter:sync()
 
-  local keys = self.key_index:get()
+  local keys = self.key_index:list()
   -- Prometheus server expects buckets of a histogram to appear in increasing
   -- numerical order of their label values.
   table.sort(keys)

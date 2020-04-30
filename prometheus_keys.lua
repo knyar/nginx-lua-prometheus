@@ -38,7 +38,7 @@ end
 
 -- Returns list of all keys. Indices might contain "holes" in places where
 -- some keys were deleted.
-function KeyIndex:get()
+function KeyIndex:list()
   self:sync()
   return self.keys
 end

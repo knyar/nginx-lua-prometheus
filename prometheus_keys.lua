@@ -8,7 +8,7 @@
 local KeyIndex = {}
 KeyIndex.__index = KeyIndex
 
-local lock_lib = require("lock")
+local lock_lib = require("prometheus_lock")
 
 function KeyIndex.new(shared_dict)
   local self = setmetatable({}, KeyIndex)

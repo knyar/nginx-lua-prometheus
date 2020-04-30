@@ -49,7 +49,7 @@
 -- This library provides per-worker counters used to store counter metric
 -- increments. Copied from https://github.com/Kong/lua-resty-counter
 local resty_counter_lib = require("prometheus_resty_counter")
-local key_index_lib = require("key_index")
+local key_index_lib = require("prometheus_keys")
 
 local Prometheus = {}
 local mt = { __index = Prometheus }

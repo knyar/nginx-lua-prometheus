@@ -493,7 +493,10 @@ function Prometheus.init(dict_name, prefix)
 
   self.initialized = true
 
-  self.errors = self:counter(ERROR_METRIC_NAME, "Number of nginx-lua-prometheus errors")
+  self:counter(ERROR_METRIC_NAME, "Number of nginx-lua-prometheus errors")
+  self.key_index:add(ERROR_METRIC_NAME)
+  self.dict:set(ERROR_METRIC_NAME, 0)
+
   return self
 end
 
@@ -512,7 +515,6 @@ function Prometheus:init_worker(sync_interval)
     error(err, 2)
   end
   self._counter = counter_instance
-  self.errors:inc(0)
 end
 
 -- Register a new metric.
@@ -688,7 +690,7 @@ end
 -- Log an error, incrementing the error counter.
 function Prometheus:log_error(...)
   ngx.log(ngx.ERR, ...)
-  self.errors:inc(1)
+  self.dict:incr(ERROR_METRIC_NAME, 1, 0)
 end
 
 -- Log an error that happened while setting up a dictionary key.

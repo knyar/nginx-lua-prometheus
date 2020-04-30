@@ -10,23 +10,25 @@ KeyIndex.__index = KeyIndex
 
 local lock_lib = require("prometheus_lock")
 
-function KeyIndex.new(shared_dict)
+function KeyIndex.new(shared_dict, prefix)
   local self = setmetatable({}, KeyIndex)
   self.dict = shared_dict
+  self.key_prefix = prefix .. "key_"
+  self.key_count = prefix .. "key_count"
   self.keys = {}
   self.index = {}
-  self.lock = lock_lib.new("__lock_keys", self.dict)
+  self.lock = lock_lib.new(prefix .. "lock_keys", self.dict)
   return self
 end
 
 -- Loads new keys that might have been added by other workers since last sync.
 function KeyIndex:sync()
-  local N = self.dict:get("__key_count") or 0
+  local N = self.dict:get(self.key_count) or 0
   -- Only sync if there are some new keys.
   if N ~= #self.keys then
     for i = #self.keys, N do
       -- Read i-th key. If it is nil, it means it was deleted by some other thread.
-      local key = self.dict:get("__key_" .. i)
+      local key = self.dict:get(self.key_prefix .. i)
       if key then
         self.keys[i] = key
         self.index[key] = i
@@ -62,12 +64,12 @@ function KeyIndex:add(key_or_keys)
       -- Skip keys which already exist in this index or in the shared dict.
       if self.index[key]==nil and self.dict:get(key) == nil then
         N = N + 1
-        self.dict:safe_add("__key_" .. N, key)
+        self.dict:safe_add(self.key_prefix .. N, key)
         self.keys[N] = key
         self.index[key] = N
       end
     end
-    self.dict:safe_set("__key_count", N)
+    self.dict:safe_set(self.key_count, N)
   else
     self.log_error("Failed to lock while creating key!")
   end
@@ -83,7 +85,7 @@ end
 function KeyIndex:remove_by_index(i)
   self.index[self.keys[i]] = nil
   self.keys[i] = nil
-  self.dict:safe_set("__key_" .. i, nil)
+  self.dict:safe_set(self.key_prefix .. i, nil)
 end
 
 -- Removes a key based on its value.

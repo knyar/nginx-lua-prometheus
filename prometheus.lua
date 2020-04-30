@@ -66,6 +66,9 @@ local TYPE_LITERAL = {
 -- Error metric incremented for this library.
 local ERROR_METRIC_NAME = "nginx_metric_errors_total"
 
+-- Prefix for internal shared dictionary items.
+local KEY_INDEX_PREFIX = "__ngx_prom__"
+
 -- Default set of latency buckets, 5ms to 10s:
 local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
                          0.4, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5, 10}
@@ -486,7 +489,7 @@ function Prometheus.init(dict_name, prefix)
   end
 
   self.registry = {}
-  self.key_index = key_index_lib.new(self.dict)
+  self.key_index = key_index_lib.new(self.dict, KEY_INDEX_PREFIX)
 
   self.initialized = true
 
@@ -529,6 +532,11 @@ end
 local function register(self, name, help, label_names, buckets, typ)
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")
+    return
+  end
+
+  if name:find(KEY_INDEX_PREFIX) == 1 then
+    ngx.log(ngx.ERR, "Prefix '" .. KEY_INDEX_PREFIX .. "' is reserved for internal purposes")
     return
   end
 

@@ -14,6 +14,7 @@ function KeyIndex.new(shared_dict, prefix)
   local self = setmetatable({}, KeyIndex)
   self.dict = shared_dict
   self.key_prefix = prefix .. "key_"
+  self.sync_hint_prefix = prefix .. "sync_"
   self.key_count = prefix .. "key_count"
   self.last = 0
   self.keys = {}
@@ -24,19 +25,39 @@ end
 
 -- Loads new keys that might have been added by other workers since last sync.
 function KeyIndex:sync()
+  local full_sync_hint = self.dict:get(self.sync_hint_prefix .. ngx.worker.id()) or 0
   local N = self.dict:get(self.key_count) or 0
-  -- Only sync if there are some new keys.
-  if N ~= self.last then
-    for i = self.last, N do
-      -- Read i-th key. If it is nil, it means it was deleted by some other thread.
-      local key = self.dict:get(self.key_prefix .. i)
-      if key then
-        self.keys[i] = key
-        self.index[key] = i
-      end
-    end
+  if full_sync_hint > 0 then
+    -- Some other worker deleted something, lets do a full sync.
+    self:sync_range(0, N)
+  elseif N ~= self.last then
+    -- Sync only new keys, if there are any.
+    self:sync_range(self.last, N)
   end
   return N
+end
+
+-- Iterates keys from first to last, adds new items and removes deleted items.
+function KeyIndex:sync_range(first, last)
+  for i = first, last do
+    -- Read i-th key. If it is nil, it means it was deleted by some other thread.
+    local key = self.dict:get(self.key_prefix .. i)
+    if key then
+      self.keys[i] = key
+      self.index[key] = i
+    elseif self.keys[i] then
+      self.index[self.keys[i]] = nil
+      self.keys[i] = nil
+    end
+  end
+end
+
+-- Sets timer to sync the index every interval seconds.
+function KeyIndex:set_periodic_syncing(interval)
+  local function peridic_sync(_, key_index)
+    key_index:sync()
+  end
+  ngx.timer.every(interval, peridic_sync, self)
 end
 
 -- Returns list of all keys. Indices might contain "holes" in places where
@@ -88,6 +109,12 @@ function KeyIndex:remove_by_index(i)
   self.index[self.keys[i]] = nil
   self.keys[i] = nil
   self.dict:safe_set(self.key_prefix .. i, nil)
+  -- create a hint for other workers that they should do a full sync
+  for id = 0, ngx.worker.count()-1 do
+    if id ~= ngx.worker.id() then
+      self.dict:incr(self.sync_hint_prefix .. id, 1, 0)
+    end
+  end
 end
 
 -- Removes a key based on its value.

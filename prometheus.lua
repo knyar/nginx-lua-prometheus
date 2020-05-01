@@ -515,6 +515,7 @@ function Prometheus:init_worker(sync_interval)
     error(err, 2)
   end
   self._counter = counter_instance
+  self.key_index:set_periodic_syncing(sync_interval)
 end
 
 -- Register a new metric.

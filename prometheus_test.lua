@@ -59,7 +59,10 @@ function Nginx.print(printed)
 end
 Nginx.worker = {}
 function Nginx.worker.id()
-  return 'testworker'
+  return 0
+end
+function Nginx.worker.count()
+  return 2
 end
 function Nginx.sleep() end
 Nginx.timer = {}

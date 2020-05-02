@@ -256,7 +256,10 @@ local function lookup_or_create(self, label_values)
     full_name = full_metric_name(self.name, self.label_names, label_values)
   end
   t[LEAF_KEY] = full_name
-  self._key_index:add(full_name)
+  local err = self._key_index:add(full_name)
+  if err then
+    return nil, err
+  end
   return full_name
 end
 
@@ -502,9 +505,11 @@ function Prometheus.init(dict_name, prefix)
   self.initialized = true
 
   self:counter(ERROR_METRIC_NAME, "Number of nginx-lua-prometheus errors")
-  self.key_index:add(ERROR_METRIC_NAME)
   self.dict:set(ERROR_METRIC_NAME, 0)
-
+  local err = self.key_index:add(ERROR_METRIC_NAME)
+  if err then
+    self:log_error(err)
+  end
   return self
 end
 

@@ -33,6 +33,7 @@ function SimpleDict:get(k)
   if k == "gauge2{f2=\"dict_error\",f1=\"dict_error\"}" then
     return nil, 0
   end
+  if not self.dict then self.dict = {} end
   return self.dict[k], 0  -- value, flags
 end
 function SimpleDict:delete(k)

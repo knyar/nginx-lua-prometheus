@@ -8,8 +8,6 @@
 local KeyIndex = {}
 KeyIndex.__index = KeyIndex
 
-local lock_lib = require("prometheus_lock")
-
 function KeyIndex.new(shared_dict, prefix)
   local self = setmetatable({}, KeyIndex)
   self.dict = shared_dict
@@ -20,7 +18,6 @@ function KeyIndex.new(shared_dict, prefix)
   self.deleted = 0
   self.keys = {}
   self.index = {}
-  self.lock = lock_lib.new(prefix .. "lock_keys", self.dict)
   return self
 end
 
@@ -65,32 +62,34 @@ end
 --
 -- Args:
 --   key_or_keys: Single string or a list of strings containing keys to add.
+--
+-- Returns:
+--   nil on success, string with error message otherwise
 function KeyIndex:add(key_or_keys)
   local keys = key_or_keys
   if type(key_or_keys) == "string" then
     keys = { key_or_keys }
   end
 
-  -- This must happen atomically, otherwise there could be a race condition
-  -- and other workers might create the same records at the same time
-  -- with different values.
-  if self.lock:wait() then
-    local N = self:sync()
-    for _, key in pairs(keys) do
-      -- Skip keys which already exist in this index or in the shared dict.
-      if self.index[key]==nil and self.dict:get(key) == nil then
-        N = N + 1
-        self.dict:safe_add(self.key_prefix .. N, key)
+  for _, key in pairs(keys) do
+    while true do
+      local N = self:sync()
+      if self.index[key] ~= nil then
+        -- key already exists, we can skip it
+        break
+      end
+      N = N+1
+      local ok, err = self.dict:safe_add(self.key_prefix .. N, key)
+      if ok then
+        self.dict:incr(self.key_count, 1, 0)
         self.keys[N] = key
         self.index[key] = N
-        self.last = N
+        break
+      elseif err ~= "exists" then
+        return "Unexpected error adding a key: " .. err
       end
     end
-    self.dict:safe_set(self.key_count, N)
-  else
-    self.log_error("Failed to lock while creating key!")
   end
-  self.lock:unlock()
 end
 
 -- Removes a key based on its index. This method is slightly more effective

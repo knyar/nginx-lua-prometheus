@@ -54,14 +54,6 @@ function KeyIndex:sync_range(first, last)
   end
 end
 
--- Sets timer to sync the index every interval seconds.
-function KeyIndex:set_periodic_syncing(interval)
-  local function peridic_sync(_, key_index)
-    key_index:sync()
-  end
-  ngx.timer.every(interval, peridic_sync, self)
-end
-
 -- Returns list of all keys. Indices might contain "holes" in places where
 -- some keys were deleted.
 function KeyIndex:list()

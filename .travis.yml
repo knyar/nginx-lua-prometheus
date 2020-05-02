@@ -37,6 +37,7 @@ before_install:
 
 script:
   - luacheck --globals ngx -- prometheus.lua
+  - luacheck --globals luaunit ngx TestPrometheus -- prometheus_test.lua
   - lua -lluacov prometheus_test.lua
 
 after_success:

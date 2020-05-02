@@ -14,9 +14,10 @@ function KeyIndex.new(shared_dict, prefix)
   local self = setmetatable({}, KeyIndex)
   self.dict = shared_dict
   self.key_prefix = prefix .. "key_"
-  self.sync_hint_prefix = prefix .. "sync_"
+  self.delete_count = prefix .. "delete_count"
   self.key_count = prefix .. "key_count"
   self.last = 0
+  self.deleted = 0
   self.keys = {}
   self.index = {}
   self.lock = lock_lib.new(prefix .. "lock_keys", self.dict)
@@ -25,11 +26,12 @@ end
 
 -- Loads new keys that might have been added by other workers since last sync.
 function KeyIndex:sync()
-  local full_sync_hint = self.dict:get(self.sync_hint_prefix .. ngx.worker.id()) or 0
+  local delete_count = self.dict:get(self.delete_count) or 0
   local N = self.dict:get(self.key_count) or 0
-  if full_sync_hint > 0 then
+  if self.deleted ~= delete_count then
     -- Some other worker deleted something, lets do a full sync.
     self:sync_range(0, N)
+    self.deleted = delete_count
   elseif N ~= self.last then
     -- Sync only new keys, if there are any.
     self:sync_range(self.last, N)
@@ -109,12 +111,9 @@ function KeyIndex:remove_by_index(i)
   self.index[self.keys[i]] = nil
   self.keys[i] = nil
   self.dict:safe_set(self.key_prefix .. i, nil)
-  -- create a hint for other workers that they should do a full sync
-  for id = 0, ngx.worker.count()-1 do
-    if id ~= ngx.worker.id() then
-      self.dict:incr(self.sync_hint_prefix .. id, 1, 0)
-    end
-  end
+  -- increment delete_count to signalize other workers that they should do a full sync
+  self.dict:incr(self.delete_count, 1, 0)
+  self.deleted = self.deleted + 1
 end
 
 -- Removes a key based on its value.

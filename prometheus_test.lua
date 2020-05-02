@@ -28,7 +28,7 @@ function SimpleDict:get(k)
   end
   return self.dict[k], 0  -- value, flags
 end
-function SimpleDict:get_keys(k)
+function SimpleDict:get_keys(_)
   local keys = {}
   for key in pairs(self.dict) do table.insert(keys, key) end
   return keys
@@ -88,14 +88,14 @@ function TestPrometheus:setUp()
   self.hist1 = self.p:histogram("l1", "Histogram 1")
   self.hist2 = self.p:histogram("l2", "Histogram 2", {"var", "site"})
 end
-function TestPrometheus:tearDown()
+function TestPrometheus.tearDown()
   ngx.logs = nil
 end
 function TestPrometheus:testInit()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
   luaunit.assertEquals(ngx.logs, nil)
 end
-function TestPrometheus:testErrorUnitialized()
+function TestPrometheus.testErrorUnitialized()
   local p = require('prometheus')
   p:counter("metric1")
   p:histogram("metric2")
@@ -104,7 +104,7 @@ function TestPrometheus:testErrorUnitialized()
 
   luaunit.assertEquals(#ngx.logs, 4)
 end
-function TestPrometheus:testErrorUnknownDict()
+function TestPrometheus.testErrorUnknownDict()
   local pok, perr = pcall(require('prometheus').init, "nonexistent")
   luaunit.assertEquals(pok, false)
   luaunit.assertStrContains(perr, "does not seem to exist")
@@ -121,17 +121,17 @@ function TestPrometheus:testErrorNoMemory()
   luaunit.assertEquals(#ngx.logs, 1)
 end
 function TestPrometheus:testErrorInvalidMetricName()
-  local h = self.p:histogram("name with a space", "Histogram")
-  local g = self.p:gauge("nonprintable\004characters", "Gauge")
-  local c = self.p:counter("0startswithadigit", "Counter")
+  self.p:histogram("name with a space", "Histogram")
+  self.p:gauge("nonprintable\004characters", "Gauge")
+  self.p:counter("0startswithadigit", "Counter")
 
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 3)
   luaunit.assertEquals(#ngx.logs, 3)
 end
 function TestPrometheus:testErrorInvalidLabels()
-  local h = self.p:histogram("hist1", "Histogram", {"le"})
-  local g = self.p:gauge("count1", "Gauge", {"le"})
-  local c = self.p:counter("count1", "Counter", {"foo\002"})
+  self.p:histogram("hist1", "Histogram", {"le"})
+  self.p:gauge("count1", "Gauge", {"le"})
+  self.p:counter("count1", "Counter", {"foo\002"})
 
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 3)
   luaunit.assertEquals(#ngx.logs, 3)

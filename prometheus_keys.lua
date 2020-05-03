@@ -49,6 +49,7 @@ function KeyIndex:sync_range(first, last)
       self.keys[i] = nil
     end
   end
+  self.last = last
 end
 
 -- Returns list of all keys. Indices might contain "holes" in places where

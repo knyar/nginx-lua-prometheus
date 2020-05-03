@@ -79,16 +79,6 @@ Metrics will be available at `http://your.nginx:9145/metrics`. Note that the
 gauge metric in this example contains values obtained from nginx global state,
 so they get set immediately before metrics are returned to the client.
 
-If you experience problems indicating that nginx doesn't know how to interpret
-lua-commands and you use an external module for nginx-lua-support (e.g. the
-`libnginx-mod-http-lua` package on Debian) try adding
-
-    load_module modules/ndk_http_module.so;
-    load_module modules/ngx_http_lua_module.so;
-
-to the beginning of `nginx.conf` to ensure the modules are loaded.
-
-
 ## API reference
 
 ### init()
@@ -414,6 +404,24 @@ server {
   ';
   }
 ```
+
+## Troubleshooting
+
+### Make sure that nginx lua module is enabled
+
+If you experience problems indicating that nginx doesn't know how to interpret
+lua scripts, please make sure that [the lua
+module](https://github.com/openresty/lua-nginx-module) is enabled. You might
+need something like this in your `nginx.conf`:
+
+    load_module modules/ndk_http_module.so;
+    load_module modules/ngx_http_lua_module.so;
+
+### Keep lua code cache enabled
+
+This module expects the
+[lua_code_cache](https://github.com/openresty/lua-nginx-module#lua_code_cache)
+option to be `on` (which is the default).
 
 ## Development
 

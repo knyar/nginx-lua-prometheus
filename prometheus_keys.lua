@@ -52,11 +52,14 @@ function KeyIndex:sync_range(first, last)
   self.last = last
 end
 
--- Returns list of all keys. Indices might contain "holes" in places where
--- some keys were deleted.
+-- Returns array of all keys.
 function KeyIndex:list()
   self:sync()
-  return self.keys
+  local copy = {}
+  for k, v in ipairs(self.keys) do
+    copy[k] = v
+  end
+  return copy
 end
 
 -- Atomically adds one or more keys to the index.

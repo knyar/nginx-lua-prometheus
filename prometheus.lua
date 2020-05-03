@@ -349,7 +349,7 @@ local function del(self, label_values)
     ngx.sleep(self.parent.sync_interval)
   end
 
-  self._key_index:remove_by_key(k)
+  self._key_index:remove(k)
   _, err = self._dict:delete(k)
   if err then
     self._log_error("Error deleting key: ".. k .. ": " .. err)
@@ -450,12 +450,12 @@ local function reset(self)
   local name_prefix = self.name .. "{"
   local name_prefix_length = #name_prefix
 
-  for key_index, key in pairs(keys) do
+  for _, key in ipairs(keys) do
     local value, key_err = self._dict:get(key)
     if value then
       -- without labels equal, or with labels and the part before { equals
       if key == self.name or name_prefix == string.sub(key, 1, name_prefix_length) then
-        self._key_index:remove_by_index(key_index)
+        self._key_index:remove(key)
         local _, err = self._dict:safe_set(key, nil)
         if err then
           self._log_error("Error resetting '", key, "': ", err)
@@ -655,7 +655,7 @@ function Prometheus:metric_data()
 
   local seen_metrics = {}
   local output = {}
-  for key_index, key in ipairs(keys) do
+  for _, key in ipairs(keys) do
     local value, err = self.dict:get(key)
     if value then
       local short_name = short_metric_name(key)
@@ -681,9 +681,6 @@ function Prometheus:metric_data()
     else
       if type(err) == "string" then
         self:log_error("Error getting '", key, "': ", err)
-      else
-        -- If the key doesn't exist, it must have been deleted by some other worker
-        self.key_index:remove_by_index(key_index)
       end
     end
   end

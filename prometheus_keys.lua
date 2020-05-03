@@ -56,8 +56,10 @@ end
 function KeyIndex:list()
   self:sync()
   local copy = {}
-  for k, v in ipairs(self.keys) do
-    copy[k] = v
+  local i = 1
+  for _, v in pairs(self.keys) do
+    copy[i] = v
+    i = i + 1
   end
   return copy
 end
@@ -96,27 +98,22 @@ function KeyIndex:add(key_or_keys)
   end
 end
 
--- Removes a key based on its index. This method is slightly more effective
--- than remove_by_key(), but can only be used when the index is known
--- (e.g.: when the user iterates over result from get()).
---
--- Args:
---   i: numeric index of the key
-function KeyIndex:remove_by_index(i)
-  self.index[self.keys[i]] = nil
-  self.keys[i] = nil
-  self.dict:safe_set(self.key_prefix .. i, nil)
-  -- increment delete_count to signalize other workers that they should do a full sync
-  self.dict:incr(self.delete_count, 1, 0)
-  self.deleted = self.deleted + 1
-end
-
 -- Removes a key based on its value.
 --
 -- Args:
 --   key: String value of the key, must exists in this index.
-function KeyIndex:remove_by_key(key)
-  self:remove_by_index(self.index[key])
+function KeyIndex:remove(key)
+  local i = self.index[key]
+  if i then
+    self.index[key] = nil
+    self.keys[i] = nil
+    self.dict:safe_set(self.key_prefix .. i, nil)
+    -- increment delete_count to signalize other workers that they should do a full sync
+    self.dict:incr(self.delete_count, 1, 0)
+    self.deleted = self.deleted + 1
+  else
+    ngx.log(ngx.ERR, "Trying to remove non-existent key: ", key)
+  end
 end
 
 return KeyIndex

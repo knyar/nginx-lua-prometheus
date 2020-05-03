@@ -36,7 +36,9 @@ before_install:
   - luarocks install luaunit
 
 script:
+<<<<<<< HEAD
   - luacheck --globals ngx -- prometheus.lua prometheus_keys.lua prometheus_resty_counter.lua
+  - luacheck --globals luaunit ngx TestPrometheus -- prometheus_test.lua
   - lua -lluacov prometheus_test.lua
 
 after_success:

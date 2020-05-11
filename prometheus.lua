@@ -138,6 +138,9 @@ local function check_metric_and_label_names(metric_name, label_names)
   if not metric_name:match("^[a-zA-Z_:][a-zA-Z0-9_:]*$") then
     return "Metric name '" .. metric_name .. "' is invalid"
   end
+  if metric_name:find(KEY_INDEX_PREFIX) == 1 then
+    return "Prefix '" .. KEY_INDEX_PREFIX .. "' is reserved for internal purposes"
+  end
   for _, label_name in ipairs(label_names or {}) do
     if label_name == "le" then
       return "Invalid label name 'le' in " .. metric_name
@@ -547,11 +550,6 @@ end
 local function register(self, name, help, label_names, buckets, typ)
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")
-    return
-  end
-
-  if name:find(KEY_INDEX_PREFIX) == 1 then
-    ngx.log(ngx.ERR, "Prefix '" .. KEY_INDEX_PREFIX .. "' is reserved for internal purposes")
     return
   end
 

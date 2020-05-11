@@ -127,9 +127,10 @@ function TestPrometheus:testErrorInvalidMetricName()
   self.p:histogram("name with a space", "Histogram")
   self.p:gauge("nonprintable\004characters", "Gauge")
   self.p:counter("0startswithadigit", "Counter")
+  self.p:counter("__ngx_prom__usesinternalprefix", "Counter no.2")
 
-  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 3)
-  luaunit.assertEquals(#ngx.logs, 3)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 4)
+  luaunit.assertEquals(#ngx.logs, 4)
 end
 function TestPrometheus:testErrorInvalidLabels()
   self.p:histogram("hist1", "Histogram", {"le"})
@@ -529,6 +530,96 @@ function TestPrometheus:testCollectWithPrefix()
   assert(find_idx(ngx.printed, "# HELP test_pref_b1 Bytes") ~= nil)
   assert(find_idx(ngx.printed, 'test_pref_b1_bucket{var="ok",le="0100.0"} 2') ~= nil)
   assert(find_idx(ngx.printed, 'test_pref_b1_sum{var="ok"} 5250') ~= nil)
+end
+
+TestKeyIndex = {}
+function TestKeyIndex:setUp()
+  self.dict = setmetatable({}, SimpleDict)
+  ngx.shared.metrics = self.dict
+  self.key_index = require('prometheus_keys').new(self.dict, '_prefix_')
+end
+function TestKeyIndex.tearDown()
+  ngx.logs = nil
+end
+function TestKeyIndex:testNew()
+  luaunit.assertEquals(ngx.logs, nil)
+end
+function TestKeyIndex:testAdd()
+  self.key_index:add("single")
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), 1)
+  luaunit.assertEquals(self.dict:get("_prefix_key_1"), "single")
+
+  self.key_index:add({"multiple", "keys"})
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), 3)
+  luaunit.assertEquals(self.dict:get("_prefix_key_2"), "multiple")
+  luaunit.assertEquals(self.dict:get("_prefix_key_3"), "keys")
+
+  -- adding already existing key should do nothing
+  self.key_index:add("single")
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), 3)
+end
+function TestKeyIndex:testRemove()
+  self.key_index:add({"key1", "key2", "key3"})
+
+  self.key_index:remove("key2")
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), 3)
+  luaunit.assertEquals(self.dict:get("_prefix_delete_count"), 1)
+  local keys = self.key_index:list()
+  luaunit.assertEquals(#keys, 2)
+  luaunit.assertEquals(keys[1], "key1")
+  luaunit.assertEquals(keys[2], "key3")
+end
+function TestKeyIndex:testList()
+  self.key_index:add({"key1", "key2", "key3"})
+  local keys = self.key_index:list()
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(#keys, 3)
+  luaunit.assertEquals(keys[1], "key1")
+  luaunit.assertEquals(keys[2], "key2")
+  luaunit.assertEquals(keys[3], "key3")
+end
+
+function TestKeyIndex:testSync()
+  self.key_index:sync()
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), nil)
+  luaunit.assertEquals(self.dict:get("_prefix_delete_count"), nil)
+
+  -- key added by another worker
+  self.dict:safe_set("_prefix_key_count", 1)
+  self.dict:safe_set("_prefix_key_1", "key1")
+  self.key_index:sync()
+  local keys = self.key_index:list()
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(#keys, 1)
+  luaunit.assertEquals(keys[1], "key1")
+
+  -- multiple keys added by another worker
+  self.dict:safe_set("_prefix_key_count", 3)
+  self.dict:safe_set("_prefix_key_2", "key2")
+  self.dict:safe_set("_prefix_key_3", "key3")
+  self.key_index:sync()
+  local keys = self.key_index:list()
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(#keys, 3)
+  luaunit.assertEquals(keys[1], "key1")
+  luaunit.assertEquals(keys[2], "key2")
+  luaunit.assertEquals(keys[3], "key3")
+
+  -- key deleted by another worker
+  self.dict:safe_set("_prefix_delete_count", 1)
+  self.dict:delete("_prefix_key_2")
+  self.dict:safe_set("_prefix_key_3", "key3")
+  self.key_index:sync()
+  local keys = self.key_index:list()
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(#keys, 2)
+  luaunit.assertEquals(keys[1], "key1")
+  luaunit.assertEquals(keys[2], "key3")
 end
 
 os.exit(luaunit.run())

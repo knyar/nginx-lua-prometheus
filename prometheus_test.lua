@@ -14,7 +14,7 @@ function SimpleDict:safe_set(k, v)
   return true, nil  -- ok, err
 end
 function SimpleDict:safe_add(k, v)
-  if k == "willnotfit" then
+  if k == "willnotfit" or v == "willnotfit" then
     return nil, "no memory"
   end
   self:set(k, v)
@@ -560,6 +560,11 @@ function TestKeyIndex:testAdd()
   self.key_index:add("single")
   luaunit.assertEquals(ngx.logs, nil)
   luaunit.assertEquals(self.dict:get("_prefix_key_count"), 3)
+
+  -- error should be returned when memory is full
+  local err = self.key_index:add("willnotfit")
+  luaunit.assertEquals(err, "Unexpected error adding a key: no memory")
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), 3)
 end
 function TestKeyIndex:testRemove()
   self.key_index:add({"key1", "key2", "key3"})
@@ -569,6 +574,13 @@ function TestKeyIndex:testRemove()
   luaunit.assertEquals(self.dict:get("_prefix_key_count"), 3)
   luaunit.assertEquals(self.dict:get("_prefix_delete_count"), 1)
   local keys = self.key_index:list()
+  luaunit.assertEquals(#keys, 2)
+  luaunit.assertEquals(keys[1], "key1")
+  luaunit.assertEquals(keys[2], "key3")
+
+  self.key_index:remove("key4")
+  luaunit.assertEquals(#ngx.logs, 1)
+  keys = self.key_index:list()
   luaunit.assertEquals(#keys, 2)
   luaunit.assertEquals(keys[1], "key1")
   luaunit.assertEquals(keys[2], "key3")

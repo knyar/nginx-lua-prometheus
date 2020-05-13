@@ -440,6 +440,8 @@ option to be `on` (which is the default).
 - Performance improvements and per-worker counters are contributed by Wangchong
   Zhou ([@fffonion](https://github.com/fffonion)) / [@Kong](
   https://github.com/Kong).
+- Metric name tracking improvements contributed by Jan Dolinár ([@dolik-rce](
+  https://github.com/dolik-rce))
 
 ## License
 

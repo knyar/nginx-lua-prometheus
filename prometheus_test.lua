@@ -13,6 +13,13 @@ function SimpleDict:safe_set(k, v)
   self:set(k, v)
   return true, nil  -- ok, err
 end
+function SimpleDict:safe_add(k, v)
+  if k == "willnotfit" or v == "willnotfit" then
+    return nil, "no memory"
+  end
+  self:set(k, v)
+  return true, nil  -- ok, err
+end
 function SimpleDict:incr(k, v, init)
   if k:find("willnotfit") then
     return nil, "no memory"
@@ -26,12 +33,8 @@ function SimpleDict:get(k)
   if k == "gauge2{f2=\"dict_error\",f1=\"dict_error\"}" then
     return nil, 0
   end
+  if not self.dict then self.dict = {} end
   return self.dict[k], 0  -- value, flags
-end
-function SimpleDict:get_keys(_)
-  local keys = {}
-  for key in pairs(self.dict) do table.insert(keys, key) end
-  return keys
 end
 function SimpleDict:delete(k)
   self.dict[k] = nil
@@ -124,9 +127,10 @@ function TestPrometheus:testErrorInvalidMetricName()
   self.p:histogram("name with a space", "Histogram")
   self.p:gauge("nonprintable\004characters", "Gauge")
   self.p:counter("0startswithadigit", "Counter")
+  self.p:counter("__ngx_prom__usesinternalprefix", "Counter no.2")
 
-  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 3)
-  luaunit.assertEquals(#ngx.logs, 3)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 4)
+  luaunit.assertEquals(#ngx.logs, 4)
 end
 function TestPrometheus:testErrorInvalidLabels()
   self.p:histogram("hist1", "Histogram", {"le"})
@@ -313,6 +317,7 @@ function TestPrometheus:testReset()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
   self.gauge1:reset()
+  self.p.key_index:sync()
   luaunit.assertEquals(self.dict:get("gauge1"), nil)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
@@ -329,6 +334,7 @@ function TestPrometheus:testReset()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
   self.gauge2:reset()
+  self.p.key_index:sync()
   luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value"}'), nil)
   luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value2"}'), nil)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
@@ -347,6 +353,7 @@ function TestPrometheus:testReset()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
   self.counter1:reset()
+  self.p.key_index:sync()
   luaunit.assertEquals(self.dict:get("metric1"), nil)
   luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="v1"}'), 1)
   luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="v2"}'), 3)
@@ -355,6 +362,7 @@ function TestPrometheus:testReset()
   self.counter1:inc(4)
   self.p._counter:sync()
   self.counter2:reset()
+  self.p.key_index:sync()
   luaunit.assertEquals(self.dict:get("metric1"), 4)
   luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="v1"}'), nil)
   luaunit.assertEquals(self.dict:get('metric2{f2="v2",f1="v2"}'), nil)
@@ -367,6 +375,7 @@ function TestPrometheus:testReset()
   -- error get from dict
   self.gauge2:inc(4, {"dict_error", "dict_error"})
   self.gauge2:reset()
+  self.p.key_index:sync()
   luaunit.assertEquals(self.dict:get('gauge2{f2="dict_error",f1="dict_error"}'), nil)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
 end
@@ -523,6 +532,108 @@ function TestPrometheus:testCollectWithPrefix()
   assert(find_idx(ngx.printed, "# HELP test_pref_b1 Bytes") ~= nil)
   assert(find_idx(ngx.printed, 'test_pref_b1_bucket{var="ok",le="0100.0"} 2') ~= nil)
   assert(find_idx(ngx.printed, 'test_pref_b1_sum{var="ok"} 5250') ~= nil)
+end
+
+TestKeyIndex = {}
+function TestKeyIndex:setUp()
+  self.dict = setmetatable({}, SimpleDict)
+  ngx.shared.metrics = self.dict
+  self.key_index = require('prometheus_keys').new(self.dict, '_prefix_')
+end
+function TestKeyIndex.tearDown()
+  ngx.logs = nil
+end
+function TestKeyIndex.testInit()
+  luaunit.assertEquals(ngx.logs, nil)
+end
+function TestKeyIndex:testAdd()
+  self.key_index:add("single")
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), 1)
+  luaunit.assertEquals(self.dict:get("_prefix_key_1"), "single")
+
+  self.key_index:add({"multiple", "keys"})
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), 3)
+  luaunit.assertEquals(self.dict:get("_prefix_key_2"), "multiple")
+  luaunit.assertEquals(self.dict:get("_prefix_key_3"), "keys")
+
+  -- adding already existing key should do nothing
+  self.key_index:add("single")
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), 3)
+
+  -- error should be returned when memory is full
+  local err = self.key_index:add("willnotfit")
+  luaunit.assertEquals(err, "Unexpected error adding a key: no memory")
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), 3)
+end
+function TestKeyIndex:testRemove()
+  self.key_index:add({"key1", "key2", "key3"})
+
+  self.key_index:remove("key2")
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), 3)
+  luaunit.assertEquals(self.dict:get("_prefix_delete_count"), 1)
+  local keys = self.key_index:list()
+  luaunit.assertEquals(#keys, 2)
+  luaunit.assertEquals(keys[1], "key1")
+  luaunit.assertEquals(keys[2], "key3")
+
+  self.key_index:remove("key4")
+  luaunit.assertEquals(#ngx.logs, 1)
+  keys = self.key_index:list()
+  luaunit.assertEquals(#keys, 2)
+  luaunit.assertEquals(keys[1], "key1")
+  luaunit.assertEquals(keys[2], "key3")
+end
+function TestKeyIndex:testList()
+  self.key_index:add({"key1", "key2", "key3"})
+  local keys = self.key_index:list()
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(#keys, 3)
+  luaunit.assertEquals(keys[1], "key1")
+  luaunit.assertEquals(keys[2], "key2")
+  luaunit.assertEquals(keys[3], "key3")
+end
+
+function TestKeyIndex:testSync()
+  self.key_index:sync()
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), nil)
+  luaunit.assertEquals(self.dict:get("_prefix_delete_count"), nil)
+
+  -- key added by another worker
+  self.dict:safe_set("_prefix_key_count", 1)
+  self.dict:safe_set("_prefix_key_1", "key1")
+  self.key_index:sync()
+  local keys = self.key_index:list()
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(#keys, 1)
+  luaunit.assertEquals(keys[1], "key1")
+
+  -- multiple keys added by another worker
+  self.dict:safe_set("_prefix_key_count", 3)
+  self.dict:safe_set("_prefix_key_2", "key2")
+  self.dict:safe_set("_prefix_key_3", "key3")
+  self.key_index:sync()
+  keys = self.key_index:list()
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(#keys, 3)
+  luaunit.assertEquals(keys[1], "key1")
+  luaunit.assertEquals(keys[2], "key2")
+  luaunit.assertEquals(keys[3], "key3")
+
+  -- key deleted by another worker
+  self.dict:safe_set("_prefix_delete_count", 1)
+  self.dict:delete("_prefix_key_2")
+  self.dict:safe_set("_prefix_key_3", "key3")
+  self.key_index:sync()
+  keys = self.key_index:list()
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertEquals(#keys, 2)
+  luaunit.assertEquals(keys[1], "key1")
+  luaunit.assertEquals(keys[2], "key3")
 end
 
 os.exit(luaunit.run())

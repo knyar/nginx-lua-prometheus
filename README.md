@@ -83,7 +83,7 @@ so they get set immediately before metrics are returned to the client.
 
 ### init()
 
-**syntax:** require("prometheus").init(*dict_name*, [*prefix*])
+**syntax:** require("prometheus").init(*dict_name*, [*prefix*, [*error_metric_name*]])
 
 Initializes the module. This should be called once from the
 [init_by_lua](https://github.com/openresty/lua-nginx-module#init_by_lua)
@@ -93,6 +93,9 @@ section in nginx configuration.
   store all metrics. Defaults to `prometheus_metrics` if not specified.
 * `prefix` is an optional string which will be prepended to metric names on
   output.
+* `error_metric_name` is an optional string that can be used to change
+  the default name of error metric (see [Built-in metrics](#built-in-metrics)
+  for details).
 
 Returns a `prometheus` object that should be used to register metrics.
 
@@ -299,11 +302,11 @@ just before `prometheus::collect()` to return a real-time value.
 
 **syntax:** gauge:inc(*value*, *label_values*)
 
-Increments or decrements a previously registered gauge. This is usually called 
-when you want to observe the real-time value of a metric that can both be 
+Increments or decrements a previously registered gauge. This is usually called
+when you want to observe the real-time value of a metric that can both be
 increased and decreased.
 
-* `value` is a value that should be added to the gauge. It could be a negative 
+* `value` is a value that should be added to the gauge. It could be a negative
 value when you need to decrease the value of the gauge. Defaults to 1.
 * `label_values` is an array of label values.
 
@@ -316,10 +319,10 @@ stripped from label values.
 
 **syntax:** gauge:del(*label_values*)
 
-Delete a previously registered gauge. This is usually called when you don't 
-need to observe such gauge (or a metric with specific label values in this 
-gauge) any more. If this gauge has labels, you have to pass `label_values` 
-to delete the specific metric of this gauge. If you want to delete all the 
+Delete a previously registered gauge. This is usually called when you don't
+need to observe such gauge (or a metric with specific label values in this
+gauge) any more. If this gauge has labels, you have to pass `label_values`
+to delete the specific metric of this gauge. If you want to delete all the
 metrics of a gauge with labels, you should call `Gauge:reset()`.
 
 * `label_values` is an array of label values.
@@ -333,8 +336,8 @@ stripped from label values.
 
 **syntax:** gauge:reset()
 
-Delete all metrics for a previously registered gauge. If this gauge have no 
-labels, it is just the same as `Gauge:del()` function. If this gauge have labels, 
+Delete all metrics for a previously registered gauge. If this gauge have no
+labels, it is just the same as `Gauge:del()` function. If this gauge have labels,
 it will delete all the metrics with different label values.
 
 ### histogram:observe()
@@ -358,7 +361,8 @@ log_by_lua '
 
 ### Built-in metrics
 
-The module increments the `nginx_metric_errors_total` metric if it encounters
+The module increments an error metric called `nginx_metric_errors_total`
+(unless another name was configured in [init()](#init)) if it encounters
 an error (for example, when `lua_shared_dict` becomes full). You might want
 to configure an alert on that metric.
 

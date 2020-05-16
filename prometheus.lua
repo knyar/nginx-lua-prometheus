@@ -289,7 +289,9 @@ local function inc_gauge(self, value, label_values)
   end
 end
 
-local ERR_MSG_COUNTER_NOT_INITIALIZED = "counter not initialied"
+local ERR_MSG_COUNTER_NOT_INITIALIZED = "counter not initialized! " ..
+  "Have you called Prometheus:init() or init_worker() from the " ..
+  "init_worker_by_lua_block nginx phase?"
 
 -- Increment a counter metric.
 --
@@ -487,6 +489,11 @@ end
 -- Returns:
 --   an object that should be used to register metrics.
 function Prometheus.init(dict_name, prefix, error_metric_name)
+  if ngx.get_phase() ~= 'init' and ngx.get_phase() ~= 'init_worker' then
+    error('Prometheus.init can only be called from ' ..
+      'init_by_lua_block or init_worker_by_lua_block', 2)
+  end
+
   local self = setmetatable({}, mt)
   dict_name = dict_name or "prometheus_metrics"
   self.dict_name = dict_name
@@ -510,6 +517,10 @@ function Prometheus.init(dict_name, prefix, error_metric_name)
   if err then
     self:log_error(err)
   end
+
+  if ngx.get_phase() == 'init_worker' then
+    self:init_worker()
+  end
   return self
 end
 
@@ -521,6 +532,13 @@ end
 -- Args:
 --   sync_interval: per-worker counter sync interval (in seconds).
 function Prometheus:init_worker(sync_interval)
+  if ngx.get_phase() ~= 'init_worker' then
+    error('Prometheus:init_worker can only be called in ' ..
+      'init_worker_by_lua_block', 2)
+  end
+  if self.sync_interval and self._counter then
+    return
+  end
   self.sync_interval = sync_interval or 1
   local counter_instance, err = resty_counter_lib.new(
       self.dict_name, self.sync_interval)

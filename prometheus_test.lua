@@ -65,6 +65,9 @@ end
 function Nginx.sleep() end
 Nginx.timer = {}
 function Nginx.timer.every(_, _, _) end
+function Nginx.get_phase()
+  return 'init_worker'
+end
 
 ngx = setmetatable({shared={}}, Nginx)
 

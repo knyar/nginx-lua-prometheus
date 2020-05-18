@@ -65,6 +65,9 @@ end
 function Nginx.sleep() end
 Nginx.timer = {}
 function Nginx.timer.every(_, _, _) end
+function Nginx.get_phase()
+  return 'init_worker'
+end
 
 ngx = setmetatable({shared={}}, Nginx)
 
@@ -82,7 +85,6 @@ function TestPrometheus:setUp()
   self.dict = setmetatable({}, SimpleDict)
   ngx.shared.metrics = self.dict
   self.p = require('prometheus').init('metrics')
-  self.p:init_worker()
   self.counter1 = self.p:counter("metric1", "Metric 1")
   self.counter2 = self.p:counter("metric2", "Metric 2", {"f2", "f1"})
   self.counter3 = self.p:counter("metric3", "Metric 3", {"f3"})
@@ -97,6 +99,43 @@ end
 function TestPrometheus:testInit()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
   luaunit.assertEquals(ngx.logs, nil)
+end
+function TestPrometheus:testInitOptions()
+  self.dict = setmetatable({}, SimpleDict)
+  ngx.shared.metrics = self.dict
+
+  local p1 = require('prometheus').init("metrics")
+  assert(p1.prefix == "")
+  assert(p1.sync_interval == 1)
+  assert(p1.error_metric_name == "nginx_metric_errors_total")
+
+  local p2 = require('prometheus').init("metrics", "test_pref_")
+  assert(p2.prefix == "test_pref_")
+  assert(p2.sync_interval == 1)
+  assert(p2.error_metric_name == "nginx_metric_errors_total")
+
+  local p3 = require('prometheus').init("metrics", {sync_interval=3})
+  assert(p3.prefix == "")
+  assert(p3.sync_interval == 3)
+  assert(p3.error_metric_name == "nginx_metric_errors_total")
+
+  local p4 = require('prometheus').init("metrics", {
+    prefix="foo", sync_interval=3, error_metric_name="foobar"})
+  assert(p4.prefix == "foo")
+  assert(p4.sync_interval == 3)
+  assert(p4.error_metric_name == "foobar")
+
+  luaunit.assertEquals(ngx.logs, nil)
+end
+function TestPrometheus:testInitWorker()
+  self.dict = setmetatable({}, SimpleDict)
+  ngx.shared.metrics = self.dict
+
+  local p1 = require('prometheus').init("metrics")
+  p1:init_worker(3)
+
+  luaunit.assertEquals(#ngx.logs, 1)
+  luaunit.assertStrContains(ngx.logs[1], "do not explicitly call init_worker")
 end
 function TestPrometheus.testErrorUnitialized()
   local p = require('prometheus')
@@ -507,7 +546,6 @@ function TestPrometheus:testCollectWithPrefix()
   self.dict = setmetatable({}, SimpleDict)
   ngx.shared.metrics = self.dict
   local p = require('prometheus').init("metrics", "test_pref_")
-  p:init_worker()
 
   local counter1 = p:counter("metric1", "Metric 1")
   local gauge1 = p:gauge("gauge1", "Gauge 1")

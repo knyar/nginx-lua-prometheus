@@ -28,7 +28,7 @@ of `nginx.conf`:
 ```
 lua_shared_dict prometheus_metrics 10M;
 lua_package_path "/path/to/nginx-lua-prometheus/?.lua;;";
-init_by_lua '
+init_worker_by_lua_block {
   prometheus = require("prometheus").init("prometheus_metrics")
   metric_requests = prometheus:counter(
     "nginx_http_requests_total", "Number of HTTP requests", {"host", "status"})
@@ -36,12 +36,11 @@ init_by_lua '
     "nginx_http_request_duration_seconds", "HTTP request latency", {"host"})
   metric_connections = prometheus:gauge(
     "nginx_http_connections", "Number of HTTP connections", {"state"})
-';
-init_worker_by_lua 'prometheus:init_worker()';
-log_by_lua '
+}
+log_by_lua_block {
   metric_requests:inc(1, {ngx.var.server_name, ngx.var.status})
   metric_latency:observe(tonumber(ngx.var.request_time), {ngx.var.server_name})
-';
+}
 ```
 
 This:
@@ -65,12 +64,12 @@ server {
   allow 192.168.0.0/16;
   deny all;
   location /metrics {
-    content_by_lua '
+    content_by_lua_block {
       metric_connections:set(ngx.var.connections_reading, {"reading"})
       metric_connections:set(ngx.var.connections_waiting, {"waiting"})
       metric_connections:set(ngx.var.connections_writing, {"writing"})
       prometheus:collect()
-    ';
+    }
   }
 }
 ```
@@ -83,51 +82,40 @@ so they get set immediately before metrics are returned to the client.
 
 ### init()
 
-**syntax:** require("prometheus").init(*dict_name*, [*prefix*, [*error_metric_name*]])
+**syntax:** require("prometheus").init(*dict_name*, [*options*]])
 
 Initializes the module. This should be called once from the
-[init_by_lua](https://github.com/openresty/lua-nginx-module#init_by_lua)
-section in nginx configuration.
+[init_worker_by_lua_block](https://github.com/openresty/lua-nginx-module#init_worker_by_lua_block)
+section of nginx configuration.
 
 * `dict_name` is the name of the nginx shared dictionary which will be used to
   store all metrics. Defaults to `prometheus_metrics` if not specified.
-* `prefix` is an optional string which will be prepended to metric names on
-  output.
-* `error_metric_name` is an optional string that can be used to change
-  the default name of error metric (see [Built-in metrics](#built-in-metrics)
-  for details).
+* `options` is a table of configuration options that can be provided. Accepted
+  options are:
+  * `prefix` (string): metric name prefix. This string will be prepended to
+    metric names on output.
+  * `error_metric_name` (string): Can be used to change the default name of
+    error metric (see [Built-in metrics](#built-in-metrics) for details).
+  * `sync_interval` (number): sets per-worker counter sync interval in seconds.
+    This sets the boundary on eventual consistency of counter metrics. Defaults
+    to 1.
 
 Returns a `prometheus` object that should be used to register metrics.
 
 Example:
 ```
-init_by_lua '
-  prometheus = require("prometheus").init("prometheus_metrics")
-';
-```
-
-### init_worker()
-
-**syntax:** prometheus:init_worker([*sync_interval*])
-
-Initializes per-worker counter. This must be called from the
-`init_worker_by_lua` section of nginx configuration.
-
-* `sync_interval` is an optional number that sets `lua-resty-counter` sync
-  interval in seconds. This sets the boundary on eventual consistency of
-  counter metrics. Defaults to 1.
-
-Example:
-```
-init_worker_by_lua 'prometheus:init_worker()';
+init_worker_by_lua_block {
+  prometheus = require("prometheus").init("prometheus_metrics", {sync_interval=3})
+}
 ```
 
 ### prometheus:counter()
 
 **syntax:** prometheus:counter(*name*, *description*, *label_names*)
 
-Registers a counter. Should be called once from the
-[init_by_lua](https://github.com/openresty/lua-nginx-module#init_by_lua)
+Registers a counter. Should be called once for each counter from the
+[init_worker_by_lua_block](
+https://github.com/openresty/lua-nginx-module#init_worker_by_lua_block)
 section.
 
 * `name` is the name of the metric.
@@ -143,21 +131,22 @@ Returns a `counter` object that can later be incremented.
 
 Example:
 ```
-init_by_lua '
+init_worker_by_lua_block {
   prometheus = require("prometheus").init("prometheus_metrics")
   metric_bytes = prometheus:counter(
     "nginx_http_request_size_bytes", "Total size of incoming requests")
   metric_requests = prometheus:counter(
     "nginx_http_requests_total", "Number of HTTP requests", {"host", "status"})
-';
+}
 ```
 
 ### prometheus:gauge()
 
 **syntax:** prometheus:gauge(*name*, *description*, *label_names*)
 
-Registers a gauge. Should be called once from the
-[init_by_lua](https://github.com/openresty/lua-nginx-module#init_by_lua)
+Registers a gauge. Should be called once for each gauge from the
+[init_worker_by_lua_block](
+https://github.com/openresty/lua-nginx-module#init_worker_by_lua_block)
 section.
 
 * `name` is the name of the metric.
@@ -170,11 +159,11 @@ Returns a `gauge` object that can later be set.
 
 Example:
 ```
-init_by_lua '
+init_worker_by_lua_block {
   prometheus = require("prometheus").init("prometheus_metrics")
   metric_connections = prometheus:gauge(
     "nginx_http_connections", "Number of HTTP connections", {"state"})
-';
+}
 ```
 
 ### prometheus:histogram()
@@ -182,8 +171,9 @@ init_by_lua '
 **syntax:** prometheus:histogram(*name*, *description*, *label_names*,
   *buckets*)
 
-Registers a histogram. Should be called once from the
-[init_by_lua](https://github.com/openresty/lua-nginx-module#init_by_lua)
+Registers a histogram. Should be called once for each histogram from the
+[init_worker_by_lua_block](
+https://github.com/openresty/lua-nginx-module#init_worker_by_lua_block)
 section.
 
 * `name` is the name of the metric.
@@ -196,14 +186,14 @@ Returns a `histogram` object that can later be used to record samples.
 
 Example:
 ```
-init_by_lua '
+init_worker_by_lua_block {
   prometheus = require("prometheus").init("prometheus_metrics")
   metric_latency = prometheus:histogram(
     "nginx_http_request_duration_seconds", "HTTP request latency", {"host"})
   metric_response_sizes = prometheus:histogram(
     "nginx_http_response_size_bytes", "Size of HTTP responses", nil,
     {10,100,1000,10000,100000,1000000})
-';
+}
 ```
 
 ### prometheus:collect()
@@ -212,13 +202,13 @@ init_by_lua '
 
 Presents all metrics in a text format compatible with Prometheus. This should be
 called in
-[content_by_lua](https://github.com/openresty/lua-nginx-module#content_by_lua)
+[content_by_lua_block](https://github.com/openresty/lua-nginx-module#content_by_lua_block)
 to expose the metrics on a separate HTTP page.
 
 Example:
 ```
 location /metrics {
-  content_by_lua 'prometheus:collect()';
+  content_by_lua_block { prometheus:collect() }
   allow 192.168.0.0/16;
   deny all;
 }
@@ -235,7 +225,7 @@ Returns metric data as an array of strings.
 **syntax:** counter:inc(*value*, *label_values*)
 
 Increments a previously registered counter. This is usually called from
-[log_by_lua](https://github.com/openresty/lua-nginx-module#log_by_lua)
+[log_by_lua_block](https://github.com/openresty/lua-nginx-module#log_by_lua_block)
 globally or per server/location.
 
 * `value` is a value that should be added to the counter. Defaults to 1.
@@ -248,10 +238,10 @@ stripped from label values.
 
 Example:
 ```
-log_by_lua '
+log_by_lua_block {
   metric_bytes:inc(tonumber(ngx.var.request_length))
   metric_requests:inc(1, {ngx.var.server_name, ngx.var.status})
-';
+}
 ```
 
 ### counter:del()
@@ -290,9 +280,9 @@ allow all workers to sync their counters.
 **syntax:** gauge:set(*value*, *label_values*)
 
 Sets the current value of a previously registered gauge. This could be called
-from [log_by_lua](https://github.com/openresty/lua-nginx-module#log_by_lua)
+from [log_by_lua_block](https://github.com/openresty/lua-nginx-module#log_by_lua_block)
 globally or per server/location to modify a gauge on each request, or from
-[content_by_lua](https://github.com/openresty/lua-nginx-module#content_by_lua)
+[content_by_lua_block](https://github.com/openresty/lua-nginx-module#content_by_lua_block)
 just before `prometheus::collect()` to return a real-time value.
 
 * `value` is a value that the gauge should be set to. Required.
@@ -345,7 +335,7 @@ it will delete all the metrics with different label values.
 **syntax:** histogram:observe(*value*, *label_values*)
 
 Records a value in a previously registered histogram. Usually called from
-[log_by_lua](https://github.com/openresty/lua-nginx-module#log_by_lua)
+[log_by_lua_block](https://github.com/openresty/lua-nginx-module#log_by_lua_block)
 globally or per server/location.
 
 * `value` is a value that should be recorded. Required.
@@ -353,10 +343,10 @@ globally or per server/location.
 
 Example:
 ```
-log_by_lua '
+log_by_lua_block {
   metric_latency:observe(tonumber(ngx.var.request_time), {ngx.var.server_name})
   metric_response_sizes:observe(tonumber(ngx.var.bytes_sent))
-';
+}
 ```
 
 ### Built-in metrics
@@ -378,7 +368,7 @@ example.
 ```
 server {
   listen 9145;
-  content_by_lua '
+  content_by_lua_block {
     local sock = assert(ngx.req.socket(true))
     local data = sock:receive()
     local location = "GET /metrics"
@@ -390,8 +380,8 @@ server {
     else
       ngx.say("HTTP/1.1 404 Not Found")
     end
-  ';
   }
+}
 ```
 
 ## Troubleshooting

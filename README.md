@@ -82,7 +82,7 @@ so they get set immediately before metrics are returned to the client.
 
 ### init()
 
-**syntax:** require("prometheus").init(*dict_name*, [*prefix*, [*error_metric_name*]])
+**syntax:** require("prometheus").init(*dict_name*, [*options*]])
 
 Initializes the module. This should be called once from the
 [init_worker_by_lua_block](https://github.com/openresty/lua-nginx-module#init_worker_by_lua_block)
@@ -90,44 +90,23 @@ section of nginx configuration.
 
 * `dict_name` is the name of the nginx shared dictionary which will be used to
   store all metrics. Defaults to `prometheus_metrics` if not specified.
-* `prefix` is an optional string which will be prepended to metric names on
-  output.
-* `error_metric_name` is an optional string that can be used to change
-  the default name of error metric (see [Built-in metrics](#built-in-metrics)
-  for details).
+* `options` is a table of configuration options that can be provided. Accepted
+  options are:
+  * `prefix` (string): metric name prefix. This string will be prepended to
+    metric names on output.
+  * `error_metric_name` (string): Can be used to change the default name of
+    error metric (see [Built-in metrics](#built-in-metrics) for details).
+  * `sync_interval` (number): sets per-worker counter sync interval in seconds.
+    This sets the boundary on eventual consistency of counter metrics. Defaults
+    to 1.
 
 Returns a `prometheus` object that should be used to register metrics.
 
 Example:
 ```
 init_worker_by_lua_block {
-  prometheus = require("prometheus").init("prometheus_metrics")
+  prometheus = require("prometheus").init("prometheus_metrics", {sync_interval=3})
 }
-```
-
-### init_worker()
-
-**syntax:** prometheus:init_worker([*sync_interval*])
-
-Initializes per-worker counter. This is typically done automatically by the
-`init` function if it's called from `init_worker_by_lua_block`. However,
-if you would like to override `sync_interval`, you can call the main `init`
-function in the [init_by_lua_block](
-https://github.com/openresty/lua-nginx-module#init_by_lua_block) section, and
-then manually call `prometheus:init_worker` in
-[init_worker_by_lua_block](https://github.com/openresty/lua-nginx-module#init_worker_by_lua_block).
-
-* `sync_interval` is an optional number that sets `lua-resty-counter` sync
-  interval in seconds. This sets the boundary on eventual consistency of
-  counter metrics. Defaults to 1.
-
-Example:
-```
-init_by_lua_block {
-  prometheus = require("prometheus").init("prometheus_metrics")
-  -- metrics defined here
-}
-init_worker_by_lua_block { prometheus:init_worker() }
 ```
 
 ### prometheus:counter()
@@ -137,9 +116,7 @@ init_worker_by_lua_block { prometheus:init_worker() }
 Registers a counter. Should be called once for each counter from the
 [init_worker_by_lua_block](
 https://github.com/openresty/lua-nginx-module#init_worker_by_lua_block)
-section (or [init_by_lua_block](
-https://github.com/openresty/lua-nginx-module#init_by_lua_block)
-if that's where you are initializing the library).
+section.
 
 * `name` is the name of the metric.
 * `description` is the text description that will be presented to Prometheus

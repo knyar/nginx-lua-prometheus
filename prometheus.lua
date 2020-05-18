@@ -66,12 +66,15 @@ local TYPE_LITERAL = {
 -- Default name for error metric incremented by this library.
 local DEFAULT_ERROR_METRIC_NAME = "nginx_metric_errors_total"
 
--- Prefix for internal shared dictionary items.
-local KEY_INDEX_PREFIX = "__ngx_prom__"
+-- Default value for per-worker counter sync interval (seconds).
+local DEFAULT_SYNC_INTERVAL = 1
 
 -- Default set of latency buckets, 5ms to 10s:
 local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
                          0.4, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5, 10}
+
+-- Prefix for internal shared dictionary items.
+local KEY_INDEX_PREFIX = "__ngx_prom__"
 
 -- Generate full metric name that includes all labels.
 --
@@ -290,7 +293,7 @@ local function inc_gauge(self, value, label_values)
 end
 
 local ERR_MSG_COUNTER_NOT_INITIALIZED = "counter not initialized! " ..
-  "Have you called Prometheus:init() or init_worker() from the " ..
+  "Have you called Prometheus:init() from the " ..
   "init_worker_by_lua_block nginx phase?"
 
 -- Increment a counter metric.
@@ -488,7 +491,7 @@ end
 --
 -- Returns:
 --   an object that should be used to register metrics.
-function Prometheus.init(dict_name, prefix, error_metric_name)
+function Prometheus.init(dict_name, options_or_prefix)
   if ngx.get_phase() ~= 'init' and ngx.get_phase() ~= 'init_worker' then
     error('Prometheus.init can only be called from ' ..
       'init_by_lua_block or init_worker_by_lua_block', 2)
@@ -503,8 +506,17 @@ function Prometheus.init(dict_name, prefix, error_metric_name)
       "Please define the dictionary using `lua_shared_dict`.", 2)
   end
 
-  self.prefix = prefix or ''
-  self.error_metric_name = error_metric_name or DEFAULT_ERROR_METRIC_NAME
+  if type(options_or_prefix) == "table" then
+    self.prefix = options_or_prefix.prefix or ''
+    self.error_metric_name = options_or_prefix.error_metric_name or
+      DEFAULT_ERROR_METRIC_NAME
+    self.sync_interval = options_or_prefix.sync_interval or
+      DEFAULT_SYNC_INTERVAL
+  else
+    self.prefix = options_or_prefix or ''
+    self.error_metric_name = DEFAULT_ERROR_METRIC_NAME
+    self.sync_interval = DEFAULT_SYNC_INTERVAL
+  end
 
   self.registry = {}
   self.key_index = key_index_lib.new(self.dict, KEY_INDEX_PREFIX)
@@ -519,15 +531,17 @@ function Prometheus.init(dict_name, prefix, error_metric_name)
   end
 
   if ngx.get_phase() == 'init_worker' then
-    self:init_worker()
+    self:init_worker(self.sync_interval)
   end
   return self
 end
 
 -- Initialize the worker counter.
 --
--- This should be called once from the `init_worker_by_lua` section in nginx
--- configuration.
+-- This can call this function from the `init_worker_by_lua` if you are calling
+-- Prometheus.init() from `init_by_lua`, but this is deprecated. Instead, just
+-- call Prometheus.init() from `init_worker_by_lua_block` and pass sync_interval
+-- as part of the `options` argument if you need.
 --
 -- Args:
 --   sync_interval: per-worker counter sync interval (in seconds).
@@ -536,10 +550,13 @@ function Prometheus:init_worker(sync_interval)
     error('Prometheus:init_worker can only be called in ' ..
       'init_worker_by_lua_block', 2)
   end
-  if self.sync_interval and self._counter then
+  if self._counter then
+    ngx.log(ngx.WARN, 'init_worker() has been called twice. ' ..
+      'Please do not explicitly call init_worker. ' ..
+      'Instead, call Prometheus:init() in the init_worker_by_lua_block')
     return
   end
-  self.sync_interval = sync_interval or 1
+  self.sync_interval = sync_interval or DEFAULT_SYNC_INTERVAL
   local counter_instance, err = resty_counter_lib.new(
       self.dict_name, self.sync_interval)
   if err then

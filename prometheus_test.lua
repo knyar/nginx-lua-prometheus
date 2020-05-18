@@ -127,6 +127,16 @@ function TestPrometheus:testInitOptions()
 
   luaunit.assertEquals(ngx.logs, nil)
 end
+function TestPrometheus:testInitWorker()
+  self.dict = setmetatable({}, SimpleDict)
+  ngx.shared.metrics = self.dict
+
+  local p1 = require('prometheus').init("metrics")
+  p1:init_worker(3)
+
+  luaunit.assertEquals(#ngx.logs, 1)
+  luaunit.assertStrContains(ngx.logs[1], "do not explicitly call init_worker")
+end
 function TestPrometheus.testErrorUnitialized()
   local p = require('prometheus')
   p:counter("metric1")

@@ -289,7 +289,7 @@ local function inc_gauge(self, value, label_values)
   end
 end
 
-local ERR_MSG_COUNTER_NOT_INITIALIZED = "counter not initialied"
+local ERR_MSG_COUNTER_NOT_INITIALIZED = "counter not initialized"
 
 -- Increment a counter metric.
 --

@@ -29,12 +29,16 @@ function SimpleDict:incr(k, v, init)
   return self.dict[k], nil  -- newval, err
 end
 function SimpleDict:get(k)
+  -- simulate key not exist
+  if k == "gauge2{f2=\"key_not_exist\",f1=\"key_not_exist\"}" then
+    return nil, nil
+  end
   -- simulate an error
   if k == "gauge2{f2=\"dict_error\",f1=\"dict_error\"}" then
-    return nil, 0
+    return nil, "dict error"
   end
   if not self.dict then self.dict = {} end
-  return self.dict[k], 0  -- value, flags
+  return self.dict[k], nil  -- value, err
 end
 function SimpleDict:delete(k)
   self.dict[k] = nil
@@ -409,6 +413,13 @@ function TestPrometheus:testReset()
   luaunit.assertEquals(self.dict:get('gauge2{f2="f2value",f1="f1value2"}'), nil)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
   luaunit.assertEquals(self.dict:get("gauge1"), 3)
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  -- key not exist
+  self.gauge2:inc(4, {"key_not_exist", "key_not_exist"})
+  self.gauge2:reset()
+  self.p.key_index:sync()
+  luaunit.assertEquals(self.dict:get('gauge2{f2="key_not_exist",f1="key_not_exist"}'), nil)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
   -- error get from dict

@@ -470,7 +470,9 @@ local function reset(self)
         end
       end
     else
-      self._log_error("Error getting '", key, "': ", key_err)
+      if type(key_err) == "string" then
+        self._log_error("Error getting '", key, "': ", key_err)
+      end
     end
   end
 

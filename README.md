@@ -402,6 +402,19 @@ This module expects the
 [lua_code_cache](https://github.com/openresty/lua-nginx-module#lua_code_cache)
 option to be `on` (which is the default).
 
+### Try using an older version of the library
+
+If you are seeing library initialization errors, followed by errors for each
+metric change request (e.g. *attempt to index global '...' (a nil value)*),
+you are probably using an old version of lua-nginx-module. For example, this
+will happen if you try using the latest version of this library with the
+`nginx-extras` package shipped with Ubuntu 16.04.
+
+If you cannot upgrade nginx and lua-nginx-module, you can try using an older
+version of this library; it will not have the latest performance optimizations,
+but will still be functional. The recommended older release to use is
+[0.20181120](https://github.com/knyar/nginx-lua-prometheus/tree/0.20181120).
+
 ## Development
 
 ### Install dependencies for testing

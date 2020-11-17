@@ -248,7 +248,7 @@ function TestPrometheus:testNonPrintableLabelValues()
   self.hist2:observe(1, {"\166omg", "fooшbar"})
 
   self.p._counter:sync()
-  luaunit.assertEquals(self.dict:get('metric2{f2="foo",f1=""}'), 1)
+  luaunit.assertEquals(self.dict:get('metric2{f2="foo",f1="baz"}'), 1)
   luaunit.assertEquals(self.dict:get('gauge2{f2="z\001",f1="\002"}'), 1)
   luaunit.assertEquals(self.dict:get('l2_sum{var="",site="fooшbar"}'), 1)
   luaunit.assertEquals(ngx.logs, nil)

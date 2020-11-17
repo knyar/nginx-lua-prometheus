@@ -86,11 +86,13 @@ local accept_range = {
 }
 
 -- Validate utf8 string for label values.
+-- Numbers taken from table 3-7 in www.unicode.org/versions/Unicode6.2.0/UnicodeStandard-6.2.pdf
 --
 -- Args:
 --   str: string
 -- Returns:
 --   (bool) whether the input string is a valid utf8 string.
+--   (number) position of the first invalid byte
 local function validate_utf8_string(str)
   local i, n = 1, #str
   local first, byte, left_size, range_idx
@@ -115,17 +117,17 @@ local function validate_utf8_string(str)
           range_idx = 5
         end
       else
-        return false
+        return false, i
       end
 
-      if i + left_size  > n then
-        return false
+      if i + left_size > n then
+        return false, i
       end
 
       for j = 1, left_size do
         byte = string.byte(str, i + j)
         if byte < accept_range[range_idx].lo or byte > accept_range[range_idx].hi then
-          return false
+          return false, i
         end
         range_idx = 1
       end
@@ -151,8 +153,10 @@ local function full_metric_name(name, label_names, label_values)
   local label_parts = {}
   for idx, key in ipairs(label_names) do
     local label_value = ""
-    if type(label_values[idx]) == "string" and validate_utf8_string(label_values[idx]) then
-      label_value = label_values[idx]:gsub("\\", "\\\\"):gsub('"', '\\"')
+    if type(label_values[idx]) == "string" then
+      local valid, pos = validate_utf8_string(label_values[idx])
+      label_value = (valid and label_values[idx] or string.sub(label_values[idx], 1, pos - 1))
+                    :gsub("\\", "\\\\"):gsub('"', '\\"')
     elseif type(label_values[idx]) ~= 'string' then
       label_value = tostring(label_values[idx])
     end

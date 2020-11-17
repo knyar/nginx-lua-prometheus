@@ -76,6 +76,65 @@ local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
 -- Prefix for internal shared dictionary items.
 local KEY_INDEX_PREFIX = "__ngx_prom__"
 
+-- Accept range for second byte of utf8
+local accept_range = {
+  {lo = 0x80, hi = 0xBF},
+  {lo = 0xA0, hi = 0xBF},
+  {lo = 0x80, hi = 0x9F},
+  {lo = 0x90, hi = 0xBF},
+  {lo = 0x80, hi = 0x8F}
+}
+
+local function valid_utf8_string(str)
+  local i, n = 1, #str
+  local first, second, third, fourth, size, range_idx
+  while i <= n do
+    first = string.byte(str, i)
+    if first < 0x80 then -- ascii
+      i = i + 1
+    else
+      range_idx = 1
+      if first >= 0xC2 and first <= 0xDF then --2 bytes
+        size = 2
+      elseif first >= 0xE0 and first <= 0xEF then --3 bytes
+        size = 3
+        if first == 0xE0 then
+          range_idx = 2
+        elseif first == 0xED then
+          range_idx = 3
+        end
+      elseif first >= 0xF0 and first <= 0xF4 then --4 bytes
+        size = 4
+        if first == 0xF0 then
+          range_idx = 4
+        elseif first == 0xF4 then
+          range_idx = 5
+        end
+      else
+        return false
+      end
+
+      if i + size > n + 1 then
+        return false
+      end
+
+      second, third, fourth  = string.byte(str, i + 1, i + size - 1)
+      if second < accept_range[range_idx].lo or second > accept_range[range_idx].hi then
+        return false
+      elseif size == 2 then
+      elseif third < accept_range[1].lo or third > accept_range[1].hi then
+        return false
+      elseif size == 3 then
+      elseif fourth < accept_range[1].lo or fourth > accept_range[1].hi then
+        return false
+      end
+
+      i = i + size
+    end
+  end
+  return true
+end
+
 -- Generate full metric name that includes all labels.
 --
 -- Args:
@@ -90,10 +149,12 @@ local function full_metric_name(name, label_names, label_values)
   end
   local label_parts = {}
   for idx, key in ipairs(label_names) do
-    local label_value = (string.format("%s", label_values[idx])
-      :gsub("[^\032-\126]", "")  -- strip non-printable characters
-      :gsub("\\", "\\\\")
-      :gsub('"', '\\"'))
+    local label_value = ""
+    if type(label_values[idx]) == "string" and valid_utf8_string(label_values[idx]) then
+      label_value = label_values[idx]:gsub("\\", "\\\\"):gsub('"', '\\"')
+    elseif type(label_values[idx]) ~= 'string' then
+      label_value = tostring(label_values[idx])
+    end
     table.insert(label_parts, key .. '="' .. label_value .. '"')
   end
   return name .. "{" .. table.concat(label_parts, ",") .. "}"

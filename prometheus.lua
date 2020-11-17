@@ -85,7 +85,13 @@ local accept_range = {
   {lo = 0x80, hi = 0x8F}
 }
 
-local function valid_utf8_string(str)
+-- Validate utf8 string for label values.
+--
+-- Args:
+--   str: string
+-- Returns:
+--   (bool) whether the input string is a valid utf8 string.
+local function validate_utf8_string(str)
   local i, n = 1, #str
   local first, second, third, fourth, size, range_idx
   while i <= n do
@@ -150,7 +156,7 @@ local function full_metric_name(name, label_names, label_values)
   local label_parts = {}
   for idx, key in ipairs(label_names) do
     local label_value = ""
-    if type(label_values[idx]) == "string" and valid_utf8_string(label_values[idx]) then
+    if type(label_values[idx]) == "string" and validate_utf8_string(label_values[idx]) then
       label_value = label_values[idx]:gsub("\\", "\\\\"):gsub('"', '\\"')
     elseif type(label_values[idx]) ~= 'string' then
       label_value = tostring(label_values[idx])

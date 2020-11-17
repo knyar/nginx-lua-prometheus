@@ -93,24 +93,22 @@ local accept_range = {
 --   (bool) whether the input string is a valid utf8 string.
 local function validate_utf8_string(str)
   local i, n = 1, #str
-  local first, second, third, fourth, size, range_idx
+  local first, byte, left_size, range_idx
   while i <= n do
     first = string.byte(str, i)
-    if first < 0x80 then -- ascii
-      i = i + 1
-    else
+    if first >= 0x80 then
       range_idx = 1
       if first >= 0xC2 and first <= 0xDF then --2 bytes
-        size = 2
+        left_size = 1
       elseif first >= 0xE0 and first <= 0xEF then --3 bytes
-        size = 3
+        left_size = 2
         if first == 0xE0 then
           range_idx = 2
         elseif first == 0xED then
           range_idx = 3
         end
       elseif first >= 0xF0 and first <= 0xF4 then --4 bytes
-        size = 4
+        left_size = 3
         if first == 0xF0 then
           range_idx = 4
         elseif first == 0xF4 then
@@ -120,23 +118,20 @@ local function validate_utf8_string(str)
         return false
       end
 
-      if i + size > n + 1 then
+      if i + left_size  > n then
         return false
       end
 
-      second, third, fourth  = string.byte(str, i + 1, i + size - 1)
-      if second < accept_range[range_idx].lo or second > accept_range[range_idx].hi then
-        return false
-      elseif size == 2 then
-      elseif third < accept_range[1].lo or third > accept_range[1].hi then
-        return false
-      elseif size == 3 then
-      elseif fourth < accept_range[1].lo or fourth > accept_range[1].hi then
-        return false
+      for j = 1, left_size do
+        byte = string.byte(str, i + j, i + j)
+        if byte < accept_range[range_idx].lo or byte > accept_range[range_idx].hi then
+          return false
+        end
+        range_idx = 1
       end
-
-      i = i + size
+      i = i + left_size
     end
+    i = i + 1
   end
   return true
 end

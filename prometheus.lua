@@ -123,7 +123,7 @@ local function validate_utf8_string(str)
       end
 
       for j = 1, left_size do
-        byte = string.byte(str, i + j, i + j)
+        byte = string.byte(str, i + j)
         if byte < accept_range[range_idx].lo or byte > accept_range[range_idx].hi then
           return false
         end

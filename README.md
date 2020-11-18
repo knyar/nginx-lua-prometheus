@@ -430,6 +430,7 @@ but will still be functional. The recommended older release to use is
 
 ### Releasing new version
 
+- update CHANGELOG.md
 - update version in the `dist.ini`
 - rename `.rockspec` file and update version inside it
 - commit changes

@@ -77,6 +77,8 @@ local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
 local KEY_INDEX_PREFIX = "__ngx_prom__"
 
 -- Accept range for second byte of utf8
+-- Leave accept_range outside validate_utf8_string function as a const variable
+-- So that we can avoid creating and destroying table frequently.
 local accept_range = {
   {lo = 0x80, hi = 0xBF},
   {lo = 0xA0, hi = 0xBF},
@@ -155,8 +157,15 @@ local function full_metric_name(name, label_names, label_values)
     local label_value = ""
     if type(label_values[idx]) == "string" then
       local valid, pos = validate_utf8_string(label_values[idx])
-      label_value = (valid and label_values[idx] or string.sub(label_values[idx], 1, pos - 1))
-                    :gsub("\\", "\\\\"):gsub('"', '\\"')
+      if not valid then
+        label_value = string.sub(label_values[idx], 1, pos - 1)
+                        :gsub("\\", "\\\\")
+                        :gsub('"', '\\"')
+      else
+        label_value = label_values[idx]
+                        :gsub("\\", "\\\\")
+                        :gsub('"', '\\"')
+      end
     elseif type(label_values[idx]) ~= 'string' then
       label_value = tostring(label_values[idx])
     end

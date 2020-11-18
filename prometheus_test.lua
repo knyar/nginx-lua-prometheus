@@ -248,9 +248,20 @@ function TestPrometheus:testNonPrintableLabelValues()
   self.hist2:observe(1, {"\166omg", "fooшbar"})
 
   self.p._counter:sync()
-  luaunit.assertEquals(self.dict:get('metric2{f2="foo",f1="bazqux"}'), 1)
-  luaunit.assertEquals(self.dict:get('gauge2{f2="z",f1=""}'), 1)
-  luaunit.assertEquals(self.dict:get('l2_sum{var="omg",site="foobar"}'), 1)
+  luaunit.assertEquals(self.dict:get('metric2{f2="foo",f1="baz"}'), 1)
+  luaunit.assertEquals(self.dict:get('gauge2{f2="z\001",f1="\002"}'), 1)
+  luaunit.assertEquals(self.dict:get('l2_sum{var="",site="fooшbar"}'), 1)
+  luaunit.assertEquals(ngx.logs, nil)
+end
+function TestPrometheus:testUTF8LableValues()
+  self.counter2:inc(1, {"¢€𤭢", "Pay in €. Thanks."})
+  self.gauge2:set(1, {"\224\143\175", "\237\129\128"})
+  self.hist2:observe(1, {"\244\143\143\143", "\244"})
+
+  self.p._counter:sync()
+  luaunit.assertEquals(self.dict:get('metric2{f2="¢€𤭢",f1="Pay in €. Thanks."}'), 1)
+  luaunit.assertEquals(self.dict:get('gauge2{f2="",f1="\237\129\128"}'), 1)
+  luaunit.assertEquals(self.dict:get('l2_sum{var="\244\143\143\143",site=""}'), 1)
   luaunit.assertEquals(ngx.logs, nil)
 end
 function TestPrometheus:testNoValues()

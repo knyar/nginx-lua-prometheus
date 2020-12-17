@@ -533,14 +533,35 @@ local function reset(self)
   end
 
   local keys = self._key_index:list()
-  local name_prefix = self.name .. "{"
-  local name_prefix_length = #name_prefix
+  local name_prefixes = {}
+  local name_prefix_length_base = #self.name
+  if self.typ == TYPE_HISTOGRAM then
+    if self.label_count == 0 then
+      name_prefixes[self.name .. "_count"] = name_prefix_length_base + 6
+      name_prefixes[self.name .. "_sum"] = name_prefix_length_base + 4
+    else
+      name_prefixes[self.name .. "_count{"] = name_prefix_length_base + 7
+      name_prefixes[self.name .. "_sum{"] = name_prefix_length_base + 5
+    end
+    name_prefixes[self.name .. "_bucket{"] = name_prefix_length_base + 8
+  else
+    name_prefixes[self.name .. "{"] = name_prefix_length_base + 1
+  end
 
   for _, key in ipairs(keys) do
     local value, key_err = self._dict:get(key)
     if value then
       -- without labels equal, or with labels and the part before { equals
-      if key == self.name or name_prefix == string.sub(key, 1, name_prefix_length) then
+      local remove = key == self.name
+      if not remove then
+        for name_prefix, name_prefix_length in pairs(name_prefixes) do
+          if name_prefix == string.sub(key, 1, name_prefix_length) then
+            remove = true
+            break
+          end
+        end
+      end
+      if remove then
         self._key_index:remove(key)
         local _, err = self._dict:safe_set(key, nil)
         if err then
@@ -716,7 +737,6 @@ local function register(self, name, help, label_names, buckets, typ)
     else
       metric.inc = inc_counter
     end
-    metric.reset = reset
     metric.del = del
   else
     metric.observe = observe
@@ -724,6 +744,7 @@ local function register(self, name, help, label_names, buckets, typ)
     metric.bucket_count = #metric.buckets
     metric.bucket_format = construct_bucket_format(metric.buckets)
   end
+  metric.reset = reset
 
   self.registry[name] = metric
   return metric

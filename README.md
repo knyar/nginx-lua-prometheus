@@ -349,6 +349,15 @@ log_by_lua_block {
 }
 ```
 
+### histogram:reset()
+
+**syntax:** histogram:reset()
+
+Delete all metrics for a previously registered histogram.
+
+This function will wait for `sync_interval` before deleting the metrics to
+allow all workers to sync their counters.
+
 ### Built-in metrics
 
 The module increments an error metric called `nginx_metric_errors_total`

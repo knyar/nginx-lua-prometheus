@@ -280,7 +280,8 @@ local function format_bucket_when_expose(key)
   end
 
   --remove leading zeros
-  local _, bucket = string.match(bucket, '(0*)(.*)')
+  local _
+  _, bucket = string.match(bucket, '(0*)(.*)')
 
   --remove trailing zeros and decimal point
   while (bucket:sub(-1) == "0") do

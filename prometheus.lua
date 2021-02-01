@@ -273,25 +273,21 @@ end
 -- Returns:
 --   (string) the formatted key
 local function format_bucket_when_expose(key)
-  local all_le_string = string.match(key, '(le=".*")')
-  local part1, bucket, part2 = string.match(key, '(le=")(.*)(")')
-  if tonumber(bucket) == nil then
+  -- get the last "le=" since the bucket would be the last variable
+  local subkey_bucket_pos = key:match(".*()le=")
+  if subkey_bucket_pos == nil then
+    return key
+  end
+  local subkey_bucket = key:sub(subkey_bucket_pos, -1)
+  local all_bucket_string = subkey_bucket:match('(le=".*")')
+  local part1, bucket, part2 = subkey_bucket:match('(le=")(.*)(")')
+  if bucket == "Inf" then
     return key
   end
 
-  --remove leading zeros
-  local _
-  _, bucket = string.match(bucket, '(0*)(.*)')
+  bucket = tostring(tonumber(bucket))
 
-  --remove trailing zeros and decimal point
-  while (bucket:sub(-1) == "0") do
-      bucket = bucket:sub(1, -2)
-  end
-  if (bucket:sub(-1) == ".") then
-      bucket = bucket:sub(1, -2)
-  end
-
-  return key:gsub(all_le_string, table.concat({part1, bucket, part2}, ""))
+  return key:gsub(all_bucket_string, table.concat({part1, bucket, part2}, ""))
 end
 
 -- Return a full metric name for a given metric+label combination.

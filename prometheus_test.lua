@@ -607,10 +607,10 @@ function TestPrometheus:testCollect()
 
   assert(find_idx(ngx.printed, "# TYPE b1 histogram") ~= nil)
   assert(find_idx(ngx.printed, "# HELP b1 Bytes") ~= nil)
-  assert(find_idx(ngx.printed, 'b1_bucket{var="ok",le="0100.0"} 2') ~= nil)
+  assert(find_idx(ngx.printed, 'b1_bucket{var="ok",le="100"} 2') ~= nil)
   assert(find_idx(ngx.printed, 'b1_sum{var="ok"} 5250') ~= nil)
 
-  assert(find_idx(ngx.printed, 'l2_bucket{var="ok",site="site2",le="04.000"} 2') ~= nil)
+  assert(find_idx(ngx.printed, 'l2_bucket{var="ok",site="site2",le="4"} 2') ~= nil)
   assert(find_idx(ngx.printed, 'l2_bucket{var="ok",site="site2",le="+Inf"} 4') ~= nil)
 
   -- check that type comment exists and is before any samples for the metric.
@@ -647,7 +647,7 @@ function TestPrometheus:testCollectWithPrefix()
 
   assert(find_idx(ngx.printed, "# TYPE test_pref_b1 histogram") ~= nil)
   assert(find_idx(ngx.printed, "# HELP test_pref_b1 Bytes") ~= nil)
-  assert(find_idx(ngx.printed, 'test_pref_b1_bucket{var="ok",le="0100.0"} 2') ~= nil)
+  assert(find_idx(ngx.printed, 'test_pref_b1_bucket{var="ok",le="100"} 2') ~= nil)
   assert(find_idx(ngx.printed, 'test_pref_b1_sum{var="ok"} 5250') ~= nil)
 end
 

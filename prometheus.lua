@@ -261,6 +261,38 @@ local function construct_bucket_format(buckets)
   return "%0" .. (max_order + max_precision + 1) .. "." .. max_precision .. "f"
 end
 
+-- Format bucket format when expose metrics.
+--
+-- This receives a key, remove leading and trailing zeros and return the cleaner
+-- number, in order to make the output more clear, without effect on the increasing
+-- order.
+--
+-- Args:
+--   key: the metric key
+--
+-- Returns:
+--   (string) the formatted key
+local function format_bucket_when_expose(key)
+  local all_le_string = string.match(key, '(le=".*")')
+  local part1, bucket, part2 = string.match(key, '(le=")(.*)(")')
+  if tonumber(bucket) == nil then
+    return key
+  end
+
+  --remove leading zeros
+  local _, bucket = string.match(bucket, '(0*)(.*)')
+
+  --remove trailing zeros and decimal point
+  while (bucket:sub(-1) == "0") do
+      bucket = bucket:sub(1, -2)
+  end
+  if (bucket:sub(-1) == ".") then
+      bucket = bucket:sub(1, -2)
+  end
+
+  return key:gsub(all_le_string, table.concat({part1, bucket, part2}, ""))
+end
+
 -- Return a full metric name for a given metric+label combination.
 --
 -- This function calculates a full metric name (or, in case of a histogram
@@ -806,6 +838,7 @@ function Prometheus:metric_data()
         end
         seen_metrics[short_name] = true
       end
+      key = format_bucket_when_expose(key)
       -- Replace "Inf" with "+Inf" in each metric's last bucket 'le' label.
       if key:find('le="Inf"', 1, true) then
         key = key:gsub('le="Inf"', 'le="+Inf"')

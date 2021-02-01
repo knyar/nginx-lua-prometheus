@@ -273,14 +273,11 @@ end
 -- Returns:
 --   (string) the formatted key
 local function format_bucket_when_expose(key)
-  -- get the last "le=" since the bucket would be the last variable
-  local subkey_bucket_pos = key:match(".*()le=")
-  if subkey_bucket_pos == nil then
-    return key
+  local part1, bucket, part2 = key:match('(,le=")(.*)(")')
+  if part1 == nil then
+    part1, bucket, part2 = key:match('({le=")(.*)(")')
   end
-  local subkey_bucket = key:sub(subkey_bucket_pos, -1)
-  local all_bucket_string = subkey_bucket:match('(le=".*")')
-  local part1, bucket, part2 = subkey_bucket:match('(le=")(.*)(")')
+  local all_bucket_string = table.concat({part1, bucket, part2}, "")
   if bucket == "Inf" then
     return key
   end

@@ -22,9 +22,8 @@
 --    used when labels were declared). "le" label for histogram metrics always
 --    goes last;
 --  * bucket boundaries (which are exposed as values of the "le" label) are
---    presented as floating point numbers with leading and trailing zeroes.
---    Number of of zeroes is determined for each bucketer automatically based on
---    bucket boundaries;
+--    stored as floating point numbers with leading and trailing zeroes,
+--    and those zeros would be removed just before we expose the metrics;
 --  * internally "+Inf" bucket is stored as "Inf" (to make it appear after
 --    all numeric buckets), and gets replaced by "+Inf" just before we
 --    expose the metrics.
@@ -40,7 +39,14 @@
 --   m1_count{site="site1"}
 --   m1_sum{site="site1"}
 --
--- "Inf" will be replaced by "+Inf" while publishing metrics.
+-- And when expose, it would change to:
+--
+--   m1_bucket{site="site1",le="0.00005"}
+--   m1_bucket{site="site1",le="10"}
+--   m1_bucket{site="site1",le="1000"}
+--   m1_bucket{site="site1",le="+Inf"}
+--   m1_count{site="site1"}
+--   m1_sum{site="site1"}
 --
 -- You can find the latest version and documentation at
 -- https://github.com/knyar/nginx-lua-prometheus
@@ -273,18 +279,17 @@ end
 -- Returns:
 --   (string) the formatted key
 local function format_bucket_when_expose(key)
-  local part1, bucket, part2 = key:match('(,le=")(.*)(")')
+  local part1, bucket, part2 = key:match('(.*[,{]le=")(.*)(".*)')
   if part1 == nil then
-    part1, bucket, part2 = key:match('({le=")(.*)(")')
-  end
-  local all_bucket_string = table.concat({part1, bucket, part2}, "")
-  if bucket == "Inf" then
     return key
   end
 
-  bucket = tostring(tonumber(bucket))
-
-  return key:gsub(all_bucket_string, table.concat({part1, bucket, part2}, ""))
+  if bucket == "Inf" then
+    return table.concat({part1, "+Inf", part2})
+  else
+    bucket = tostring(tonumber(bucket))
+    return table.concat({part1, bucket, part2})
+  end
 end
 
 -- Return a full metric name for a given metric+label combination.
@@ -833,10 +838,6 @@ function Prometheus:metric_data()
         seen_metrics[short_name] = true
       end
       key = format_bucket_when_expose(key)
-      -- Replace "Inf" with "+Inf" in each metric's last bucket 'le' label.
-      if key:find('le="Inf"', 1, true) then
-        key = key:gsub('le="Inf"', 'le="+Inf"')
-      end
       table.insert(output, string.format("%s%s %s\n", self.prefix, key, value))
     else
       if type(err) == "string" then

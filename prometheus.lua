@@ -39,7 +39,7 @@
 --   m1_count{site="site1"}
 --   m1_sum{site="site1"}
 --
--- And when expose, it would change to:
+-- And when exposing the metrics, their names will be changed to:
 --
 --   m1_bucket{site="site1",le="0.00005"}
 --   m1_bucket{site="site1",le="10"}
@@ -267,18 +267,16 @@ local function construct_bucket_format(buckets)
   return "%0" .. (max_order + max_precision + 1) .. "." .. max_precision .. "f"
 end
 
--- Format bucket format when expose metrics.
+-- Format bucket format when exposing metrics.
 --
--- This receives a key, remove leading and trailing zeros and return the cleaner
--- number, in order to make the output more clear, without effect on the increasing
--- order.
+-- This function removes leading and trailing zeroes from `le` label values.
 --
 -- Args:
 --   key: the metric key
 --
 -- Returns:
 --   (string) the formatted key
-local function format_bucket_when_expose(key)
+local function fix_histogram_bucket_labels(key)
   local part1, bucket, part2 = key:match('(.*[,{]le=")(.*)(".*)')
   if part1 == nil then
     return key
@@ -287,13 +285,7 @@ local function format_bucket_when_expose(key)
   if bucket == "Inf" then
     return table.concat({part1, "+Inf", part2})
   else
-    bucket = tostring(tonumber(bucket))
-    -- In lua5.3 when decimal part is zero, tonumber would not turn float to int like <5.3,
-    -- rather it would leave '.0' at the end. So trim it here.
-    if (bucket:sub(-2, -1) == ".0") then
-      bucket = bucket:sub(1, -3)
-    end
-    return table.concat({part1, bucket, part2})
+    return table.concat({part1, tostring(tonumber(bucket)), part2})
   end
 end
 
@@ -842,7 +834,7 @@ function Prometheus:metric_data()
         end
         seen_metrics[short_name] = true
       end
-      key = format_bucket_when_expose(key)
+      key = fix_histogram_bucket_labels(key)
       table.insert(output, string.format("%s%s %s\n", self.prefix, key, value))
     else
       if type(err) == "string" then

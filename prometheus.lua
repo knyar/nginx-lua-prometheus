@@ -287,7 +287,17 @@ local function format_bucket_when_expose(key)
   if bucket == "Inf" then
     return table.concat({part1, "+Inf", part2})
   else
-    bucket = tostring(tonumber(bucket))
+    --remove leading zeros
+    local _
+    _, bucket = string.match(bucket, '(0*)(.*)')
+
+    --remove trailing zeros and decimal point
+    while (bucket:sub(-1) == "0") do
+        bucket = bucket:sub(1, -2)
+    end
+    if (bucket:sub(-1) == ".") then
+        bucket = bucket:sub(1, -2)
+    end
     return table.concat({part1, bucket, part2})
   end
 end

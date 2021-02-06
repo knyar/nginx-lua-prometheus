@@ -4,6 +4,10 @@ This file only calls out major changes. Please see [the list of Git commits](
 https://github.com/knyar/nginx-lua-prometheus/commits/master) for the full list
 of changes.
 
+## 0.20210206
+
+Bucket label values no longer have leading and trailing zeroes (#119).
+
 ## 0.20201218
 
 Histogram metrics can now be reset (#112).

@@ -25,11 +25,13 @@ To track request latency broken down by server name and request count
 broken down by server name and status, add the following to the `http` section
 of `nginx.conf`:
 
-```
+```nginx
 lua_shared_dict prometheus_metrics 10M;
 lua_package_path "/path/to/nginx-lua-prometheus/?.lua;;";
+
 init_worker_by_lua_block {
   prometheus = require("prometheus").init("prometheus_metrics")
+
   metric_requests = prometheus:counter(
     "nginx_http_requests_total", "Number of HTTP requests", {"host", "status"})
   metric_latency = prometheus:histogram(
@@ -37,6 +39,7 @@ init_worker_by_lua_block {
   metric_connections = prometheus:gauge(
     "nginx_http_connections", "Number of HTTP connections", {"state"})
 }
+
 log_by_lua_block {
   metric_requests:inc(1, {ngx.var.server_name, ngx.var.status})
   metric_latency:observe(tonumber(ngx.var.request_time), {ngx.var.server_name})
@@ -58,7 +61,7 @@ This:
 Last step is to configure a separate server that will expose the metrics.
 Please make sure to only make it reachable from your Prometheus server:
 
-```
+```nginx
 server {
   listen 9145;
   allow 192.168.0.0/16;
@@ -103,7 +106,7 @@ section of nginx configuration.
 Returns a `prometheus` object that should be used to register metrics.
 
 Example:
-```
+```nginx
 init_worker_by_lua_block {
   prometheus = require("prometheus").init("prometheus_metrics", {sync_interval=3})
 }
@@ -130,9 +133,10 @@ documentation provides good guidelines on choosing metric and label names.
 Returns a `counter` object that can later be incremented.
 
 Example:
-```
+```nginx
 init_worker_by_lua_block {
   prometheus = require("prometheus").init("prometheus_metrics")
+
   metric_bytes = prometheus:counter(
     "nginx_http_request_size_bytes", "Total size of incoming requests")
   metric_requests = prometheus:counter(
@@ -158,9 +162,10 @@ section.
 Returns a `gauge` object that can later be set.
 
 Example:
-```
+```nginx
 init_worker_by_lua_block {
   prometheus = require("prometheus").init("prometheus_metrics")
+
   metric_connections = prometheus:gauge(
     "nginx_http_connections", "Number of HTTP connections", {"state"})
 }
@@ -185,9 +190,10 @@ section.
 Returns a `histogram` object that can later be used to record samples.
 
 Example:
-```
+```nginx
 init_worker_by_lua_block {
   prometheus = require("prometheus").init("prometheus_metrics")
+
   metric_latency = prometheus:histogram(
     "nginx_http_request_duration_seconds", "HTTP request latency", {"host"})
   metric_response_sizes = prometheus:histogram(
@@ -206,7 +212,7 @@ called in
 to expose the metrics on a separate HTTP page.
 
 Example:
-```
+```nginx
 location /metrics {
   content_by_lua_block { prometheus:collect() }
   allow 192.168.0.0/16;
@@ -237,7 +243,7 @@ be provided for counters with no labels. Non-printable characters will be
 stripped from label values.
 
 Example:
-```
+```nginx
 log_by_lua_block {
   metric_bytes:inc(tonumber(ngx.var.request_length))
   metric_requests:inc(1, {ngx.var.server_name, ngx.var.status})
@@ -342,7 +348,7 @@ globally or per server/location.
 * `label_values` is an array of label values.
 
 Example:
-```
+```nginx
 log_by_lua_block {
   metric_latency:observe(tonumber(ngx.var.request_time), {ngx.var.server_name})
   metric_response_sizes:observe(tonumber(ngx.var.bytes_sent))
@@ -374,7 +380,7 @@ in Nginx. If you are using this library to collect metrics from stream module,
 you will need to configure a separate endpoint to return them. Here's an
 example.
 
-```
+```nginx
 server {
   listen 9145;
   content_by_lua_block {
@@ -402,8 +408,10 @@ lua scripts, please make sure that [the lua
 module](https://github.com/openresty/lua-nginx-module) is enabled. You might
 need something like this in your `nginx.conf`:
 
-    load_module modules/ndk_http_module.so;
-    load_module modules/ngx_http_lua_module.so;
+```nginx
+load_module modules/ndk_http_module.so;
+load_module modules/ngx_http_lua_module.so;
+```
 
 ### Keep lua code cache enabled
 

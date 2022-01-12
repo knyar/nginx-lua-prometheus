@@ -56,7 +56,7 @@
 -- increments. Copied from https://github.com/Kong/lua-resty-counter
 local resty_counter_lib = require("prometheus_resty_counter")
 local key_index_lib = require("prometheus_keys")
-local ngx_re_match = ngx.re.match
+local re_sub = ngx.re.sub
 
 local Prometheus = {}
 local mt = { __index = Prometheus }
@@ -82,8 +82,6 @@ local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
 
 -- Prefix for internal shared dictionary items.
 local KEY_INDEX_PREFIX = "__ngx_prom__"
-
-local METRICS_KEY_REGEX = [[(.*[,{]le=")(.*)(".*)]]
 
 -- Accepted range of byte values for tailing bytes of utf8 strings.
 -- This is defined outside of the validate_utf8_string function as a const
@@ -280,21 +278,24 @@ end
 -- Returns:
 --   (string) the formatted key
 local function fix_histogram_bucket_labels(key)
-  local match, err = ngx_re_match(key, METRICS_KEY_REGEX, "jo")
-  if err then
-    self._log_error("failed to match regex: ", err)
+  local new_labels, n, err = re_sub(key, [[le="Inf"]], [[le="+Inf"]], "jo")
+  if not new_labels then
+    self._log_error("failed to fix histogram bucket labels: ", key, ", err: ", err)
     return
   end
 
-  if not match then
+  if n == 0 then
+    -- no need to replace
     return key
   end
 
-  if match[2] == "Inf" then
-    return table.concat({match[1], "+Inf", match[3]})
-  else
-    return table.concat({match[1], tostring(tonumber(match[2])), match[3]})
+  if n == 1 then
+    -- replace `le="Inf"` with `le="+Inf"`
+    return new_labels
   end
+
+  self._log_error("multiple replacement when fixing histogram bucket labels: ", key)
+  return
 end
 
 -- Return a full metric name for a given metric+label combination.

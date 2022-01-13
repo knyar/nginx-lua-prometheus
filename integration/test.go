@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -75,6 +76,25 @@ func hasMetricFamily(mfs map[string]*dto.MetricFamily, want *dto.MetricFamily) e
 		}
 	}
 	return fmt.Errorf("Metric family %v not found in %v", want, mfs)
+}
+
+// checkBucketsLabels verifies that the le of the bucket label is still Inf
+func checkBucketsLabels(mfs map[string]*dto.MetricFamily, metric string) float64 {
+	for _, mf := range mfs {
+		if *mf.Name == metric {
+			for _, m := range mf.Metric {
+				for _, b := range m.Histogram.Bucket {
+					var le string
+					le = strconv.FormatFloat(*b.UpperBound, 'f', 3, 64)
+					if le == "Inf" {
+						return -1
+					}
+				}
+			}
+		}
+	}
+
+	return 1
 }
 
 func main() {
@@ -209,5 +229,10 @@ func main() {
 			log.Fatal(err)
 		}
 	}
+
+	if v := checkBucketsLabels(mfs, "request_duration_seconds"); v != 1 {
+		log.Fatalf("le of the bucket label is still Inf")
+	}
+
 	log.Print("All ok")
 }

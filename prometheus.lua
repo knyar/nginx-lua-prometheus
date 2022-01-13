@@ -282,7 +282,7 @@ end
 local function fix_histogram_bucket_labels(key)
   local match, err = ngx_re_match(key, METRICS_KEY_REGEX, "jo")
   if err then
-    self._log_error("failed to match regex: ", err)
+    ngx.log(ngx.ERR, "failed to match regex: ", err)
     return
   end
 

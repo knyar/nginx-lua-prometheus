@@ -57,6 +57,7 @@
 local resty_counter_lib = require("prometheus_resty_counter")
 local key_index_lib = require("prometheus_keys")
 local ngx_re_match = ngx.re.match
+local ngx_re_gsub = ngx.re.gsub
 
 local Prometheus = {}
 local mt = { __index = Prometheus }
@@ -262,7 +263,9 @@ local function construct_bucket_format(buckets)
   for _, bucket in ipairs(buckets) do
     assert(type(bucket) == "number", "bucket boundaries should be numeric")
     -- floating point number with all trailing zeros removed
-    local as_string = string.format("%f", bucket):gsub("0*$", "")
+    local bucket_str = string.format("%f", bucket)
+    local as_string = ngx_re_gsub(bucket_str, "0*$", "", "jo")
+
     local dot_idx = as_string:find(".", 1, true)
     max_order = math.max(max_order, dot_idx - 1)
     max_precision = math.max(max_precision, as_string:len() - dot_idx)
@@ -730,9 +733,10 @@ local function register(self, name, help, label_names, buckets, typ)
     return
   end
 
-  local name_maybe_historgram = name:gsub("_bucket$", "")
-                                    :gsub("_count$", "")
-                                    :gsub("_sum$", "")
+  local gsub_a = ngx_re_gsub(name, "_bucket$", "", "jo")
+  local gsub_b = ngx_re_gsub(gsub_a, "_count$", "", "jo")
+  local name_maybe_historgram = ngx_re_gsub(gsub_b, "_sum$", "", "jo")
+
   if (typ ~= TYPE_HISTOGRAM and (
       self.registry[name] or self.registry[name_maybe_historgram]
     )) or

@@ -1,0 +1,40 @@
+name: Run Tests
+on: [push]
+jobs:
+  lua:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        lua: ["5.1", "5.2"]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+      - run: pip install hererocks
+      # Install latest LuaRocks version plus the Lua version for this build job
+      # into 'here' subdirectory.
+      - run: hererocks here -r^ --lua ${{ matrix.lua }}
+      - run: echo $PWD/here/bin >> $GITHUB_PATH
+      - run: eval `luarocks path --bin`
+      - run: luarocks install luacheck
+      - run: luarocks install luacov-coveralls
+      - run: luarocks install luaunit
+      - run: luacheck --globals ngx -- prometheus.lua prometheus_keys.lua prometheus_resty_counter.lua
+      - run: luacheck --globals luaunit ngx TestPrometheus TestKeyIndex -- prometheus_test.lua
+      - run: lua -lluacov prometheus_test.lua
+      - run: luacov-coveralls --include %./prometheus.lua --include %./prometheus_keys.lua --include %./prometheus_resty_counter.lua
+        env:
+          COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: integration
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-go@v2
+        with:
+          go-version: 1.14
+      - run: go get
+      - run: ./test.sh

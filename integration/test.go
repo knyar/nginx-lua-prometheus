@@ -80,8 +80,11 @@ func hasMetricFamily(mfs map[string]*dto.MetricFamily, want *dto.MetricFamily) e
 func main() {
 	flag.Parse()
 
-	// Use a custom http client with a lower idle connection timeout.
-	client := &http.Client{Transport: &http.Transport{IdleConnTimeout: 400 * time.Millisecond}}
+	// Use a custom http client with a lower idle connection timeout and a request timeout.
+	client := &http.Client{
+		Timeout:   500 * time.Millisecond,
+		Transport: &http.Transport{IdleConnTimeout: 400 * time.Millisecond},
+	}
 
 	log.Printf("Starting the test with %d concurrent clients", *concurrency)
 	var wg sync.WaitGroup

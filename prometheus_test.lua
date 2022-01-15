@@ -74,15 +74,15 @@ function Nginx.get_phase()
   return 'init_worker'
 end
 Nginx.re = {}
-function Nginx.re.match(subject, regexp, opts)
+function Nginx.re.match(subject, regexp, _)
   local result = {rex_pcre2.match(subject, regexp)}
   if result[1] == nil or result[1] == false then
     return nil, nil
   end
   return result, nil
 end
-function Nginx.re.gsub(subject, regexp, replace, opts)
-  local result, matches, substitutions = rex_pcre2.gsub(subject, regexp, replace)
+function Nginx.re.gsub(subject, regexp, replace, _)
+  local result, _, substitutions = rex_pcre2.gsub(subject, regexp, replace)
   return result, substitutions, nil
 end
 

@@ -22,9 +22,11 @@ jobs:
       - run: luacheck --globals ngx -- prometheus.lua prometheus_keys.lua prometheus_resty_counter.lua
       - run: luacheck --globals luaunit ngx TestPrometheus TestKeyIndex -- prometheus_test.lua
       - run: lua -lluacov prometheus_test.lua
-      - run: luacov-coveralls --include %./prometheus.lua --include %./prometheus_keys.lua --include %./prometheus_resty_counter.lua
+      - run: luacov-coveralls --include ^prometheus
         env:
           COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Only report test coverage for lua 5.1 to avoid doing it twice.
+        if: ${{ matrix.lua == '5.1' }}
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 10

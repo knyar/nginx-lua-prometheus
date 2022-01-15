@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
 	"math/rand"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
@@ -42,6 +42,9 @@ var urls = map[requestType]string{
 	reqSlow:  "http://localhost:18002/",
 	reqError: "http://localhost:18001/error",
 }
+
+// Verify bucket boundaries. This should match the buckets defined in nginx.conf.
+var buckets = []float64{0.08, 0.089991, 0.1, 0.2, 0.75, 1, 1.5, 3.123232001, 5, 15, 120, 350.5, 1500, 75000, 1500000, math.Inf(1)}
 
 // getHistogramSum returns the 'sum' value for a given histogram metric.
 func getHistogramSum(mfs map[string]*dto.MetricFamily, metric string, labels [][]string) float64 {
@@ -78,23 +81,32 @@ func hasMetricFamily(mfs map[string]*dto.MetricFamily, want *dto.MetricFamily) e
 	return fmt.Errorf("Metric family %v not found in %v", want, mfs)
 }
 
-// checkBucketsLabels verifies that the le of the bucket label is still Inf
-func checkBucketsLabels(mfs map[string]*dto.MetricFamily, metric string) float64 {
+// checkBucketBoundaries verifies bucket boundary values.
+func checkBucketBoundaries(mfs map[string]*dto.MetricFamily, metric string) error {
+	matched := false
 	for _, mf := range mfs {
-		if *mf.Name == metric {
-			for _, m := range mf.Metric {
-				for _, b := range m.Histogram.Bucket {
-					var le string
-					le = strconv.FormatFloat(*b.UpperBound, 'f', 3, 64)
-					if le == "Inf" {
-						return -1
-					}
+		if *mf.Name != metric {
+			continue
+		}
+		matched = true
+		for _, m := range mf.Metric {
+			if len(m.Histogram.Bucket) != len(buckets) {
+				return fmt.Errorf("expected %d buckets but got %d: %v", len(buckets), len(m.Histogram.Bucket), m.Histogram.Bucket)
+			}
+			for idx, b := range m.Histogram.Bucket {
+				tolerance := 0.00001
+				if diff := math.Abs(*b.UpperBound - buckets[idx]); diff > tolerance {
+					return fmt.Errorf("unexpected value for bucket #%d; want %f got %f", idx, buckets[idx], *b.UpperBound)
 				}
 			}
 		}
 	}
 
-	return 1
+	if !matched {
+		return fmt.Errorf("could not find metric %s", metric)
+	}
+
+	return nil
 }
 
 func main() {
@@ -233,8 +245,8 @@ func main() {
 		}
 	}
 
-	if v := checkBucketsLabels(mfs, "request_duration_seconds"); v != 1 {
-		log.Fatalf("le of the bucket label is still Inf")
+	if err := checkBucketBoundaries(mfs, "request_duration_seconds"); err != nil {
+		log.Fatal(err)
 	}
 
 	log.Print("All ok")

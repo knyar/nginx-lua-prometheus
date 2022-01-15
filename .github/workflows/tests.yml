@@ -1,5 +1,10 @@
 name: Run Tests
-on: [push]
+on:
+  push:
+  schedule:
+    # Run tests weekly to make sure they keep working despite various
+    # dependency changes.
+    - cron: '23 06 * * 5'
 jobs:
   lua:
     runs-on: ubuntu-latest

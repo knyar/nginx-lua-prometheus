@@ -10,6 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-python@v2
+      - run: apt install libpcre2-dev
       - run: pip install hererocks
       # Install latest LuaRocks version plus the Lua version for this build job
       # into 'here' subdirectory.
@@ -19,6 +20,7 @@ jobs:
       - run: luarocks install luacheck
       - run: luarocks install luacov-coveralls
       - run: luarocks install luaunit
+      - run: luarocks install lrexlib-pcre2
       - run: luacheck --globals ngx -- prometheus.lua prometheus_keys.lua prometheus_resty_counter.lua
       - run: luacheck --globals luaunit ngx TestPrometheus TestKeyIndex -- prometheus_test.lua
       - run: lua -lluacov prometheus_test.lua

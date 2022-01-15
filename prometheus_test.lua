@@ -1,5 +1,6 @@
 -- vim: ts=2:sw=2:sts=2:expandtab
 luaunit = require('luaunit')
+rex_pcre2 = require('rex_pcre2')
 
 -- Simple implementation of a nginx shared dictionary
 local SimpleDict = {}
@@ -71,6 +72,18 @@ Nginx.timer = {}
 function Nginx.timer.every(_, _, _) end
 function Nginx.get_phase()
   return 'init_worker'
+end
+Nginx.re = {}
+function Nginx.re.match(subject, regexp, opts)
+  local result = {rex_pcre2.match(subject, regexp)}
+  if result[1] == nil or result[1] == false then
+    return nil, nil
+  end
+  return result, nil
+end
+function Nginx.re.gsub(subject, regexp, replace, opts)
+  local result, matches, substitutions = rex_pcre2.gsub(subject, regexp, replace)
+  return result, substitutions, nil
 end
 
 ngx = setmetatable({shared={}}, Nginx)

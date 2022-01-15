@@ -56,6 +56,8 @@
 -- increments. Copied from https://github.com/Kong/lua-resty-counter
 local resty_counter_lib = require("prometheus_resty_counter")
 local key_index_lib = require("prometheus_keys")
+local ngx_re_match = ngx.re.match
+local ngx_re_gsub = ngx.re.gsub
 
 local Prometheus = {}
 local mt = { __index = Prometheus }
@@ -81,6 +83,8 @@ local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
 
 -- Prefix for internal shared dictionary items.
 local KEY_INDEX_PREFIX = "__ngx_prom__"
+
+local METRICS_KEY_REGEX = [[(.*[,{]le=")(.*)(".*)]]
 
 -- Accepted range of byte values for tailing bytes of utf8 strings.
 -- This is defined outside of the validate_utf8_string function as a const
@@ -259,7 +263,9 @@ local function construct_bucket_format(buckets)
   for _, bucket in ipairs(buckets) do
     assert(type(bucket) == "number", "bucket boundaries should be numeric")
     -- floating point number with all trailing zeros removed
-    local as_string = string.format("%f", bucket):gsub("0*$", "")
+    local bucket_str = string.format("%f", bucket)
+    local as_string = ngx_re_gsub(bucket_str, "0*$", "", "jo")
+
     local dot_idx = as_string:find(".", 1, true)
     max_order = math.max(max_order, dot_idx - 1)
     max_precision = math.max(max_precision, as_string:len() - dot_idx)
@@ -277,15 +283,20 @@ end
 -- Returns:
 --   (string) the formatted key
 local function fix_histogram_bucket_labels(key)
-  local part1, bucket, part2 = key:match('(.*[,{]le=")(.*)(".*)')
-  if part1 == nil then
+  local match, err = ngx_re_match(key, METRICS_KEY_REGEX, "jo")
+  if err then
+    ngx.log(ngx.ERR, "failed to match regex: ", err)
+    return
+  end
+
+  if not match then
     return key
   end
 
-  if bucket == "Inf" then
-    return table.concat({part1, "+Inf", part2})
+  if match[2] == "Inf" then
+    return table.concat({match[1], "+Inf", match[3]})
   else
-    return table.concat({part1, tostring(tonumber(bucket)), part2})
+    return table.concat({match[1], tostring(tonumber(match[2])), match[3]})
   end
 end
 
@@ -722,9 +733,10 @@ local function register(self, name, help, label_names, buckets, typ)
     return
   end
 
-  local name_maybe_historgram = name:gsub("_bucket$", "")
-                                    :gsub("_count$", "")
-                                    :gsub("_sum$", "")
+  local gsub_a = ngx_re_gsub(name, "_bucket$", "", "jo")
+  local gsub_b = ngx_re_gsub(gsub_a, "_count$", "", "jo")
+  local name_maybe_historgram = ngx_re_gsub(gsub_b, "_sum$", "", "jo")
+
   if (typ ~= TYPE_HISTOGRAM and (
       self.registry[name] or self.registry[name_maybe_historgram]
     )) or

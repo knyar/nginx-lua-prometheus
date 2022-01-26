@@ -10,6 +10,13 @@ cd "${base_dir}"
 
 docker build -t ${image_name} .
 
+function nginx_logs {
+  docker logs ${container_name} || true
+  # Debian has nginx compiled with --error-log-path=/var/log/nginx/error.log
+  # so some early messages might be logged there.
+  docker exec ${container_name} cat /var/log/nginx/error.log || true
+}
+
 function cleanup {
   docker rm -f ${container_name} || true
 }
@@ -20,10 +27,10 @@ docker run -d --name ${container_name} -p 18001:18001 -p 18002:18002 \
   -v "${base_dir}/../:/nginx-lua-prometheus" ${image_name} \
   nginx -c /nginx-lua-prometheus/integration/nginx.conf
 
-go run test.go
+RC=0
+go run test.go || RC=$?
 
-if docker logs ${container_name} 2>&1 | grep -q 'error'; then
-  echo "There were unexpected errors in the log:"
-  docker logs ${container_name}
-  exit 1
-fi
+nginx_logs 2>&1 | tail -30
+
+echo Exiting with code $RC
+exit $RC

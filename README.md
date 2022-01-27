@@ -8,11 +8,16 @@ expose them on a separate web page to be pulled by
 
 ## Installation
 
-You need to install nginx package with lua support (`libnginx-mod-http-lua` on
-newer Debian versions, or `nginx-extras` on older ones). The library file,
-`prometheus.lua`, needs to be available in `LUA_PATH`. If this is the only Lua
-library you use, you can just point `lua_package_path` to the directory with
-this git repo checked out (see example below).
+To use this library, you will need the [ngx_lua](
+https://github.com/openresty/lua-nginx-module) nginx module. You can either use
+a lua-enabled nginx-based server like [OpenResty](https://openresty.org/en/),
+or a regulal nginx server with the module enabled: for example, on Debian 10 you
+can simply install `libnginx-mod-http-lua` (but please read the [known issues](
+#known-issues) if you use a later Debian version).
+
+The library file - `prometheus.lua` - needs to be available in `LUA_PATH`. If
+this is the only Lua library you use, you can just point `lua_package_path` to
+the directory with this git repo checked out (see example below).
 
 OpenResty users will find this library in [opm](https://opm.openresty.org/). It
 is also available via
@@ -397,6 +402,26 @@ server {
   }
 }
 ```
+
+## Known issues
+
+### libnginx-mod-http-lua broken in some Debian and Ubuntu versions
+
+Note that recent stable versions of Debian and Ubuntu are known to package
+`ngx_lua` version incompatible with the version of `nginx` shipped in the same
+distro. This results in nginx process segfaulting when the lua module is used,
+making it completely unusable. In such case nginx error logs will clearly
+indicate that the process crashed, e.g.:
+
+```
+[alert] 123#123: worker process 45678 exited on signal 11
+```
+
+The following versions of Debian and Ubuntu have been known to have this
+issue:
+
+* Debian 11 (bug [#994178](https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=994178))
+* Ubuntu 20.04 and 21.04 (bug [#1893753](https://bugs.launchpad.net/ubuntu/+source/nginx/+bug/1893753))
 
 ## Troubleshooting
 

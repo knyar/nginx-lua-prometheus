@@ -56,6 +56,7 @@
 -- increments. Copied from https://github.com/Kong/lua-resty-counter
 local resty_counter_lib = require("prometheus_resty_counter")
 local key_index_lib = require("prometheus_keys")
+local utils = require("prometheus_utils")
 local ngx_re_match = ngx.re.match
 local ngx_re_gsub = ngx.re.gsub
 
@@ -182,7 +183,7 @@ local function full_metric_name(name, label_names, label_values)
     else
       label_value = tostring(label_values[idx])
     end
-    table.insert(label_parts, key .. '="' .. label_value .. '"')
+    utils.insert_tail(label_parts, key .. '="' .. label_value .. '"')
   end
   return name .. "{" .. table.concat(label_parts, ",") .. "}"
 end
@@ -198,15 +199,16 @@ end
 --   (string) short metric name with no labels. For a `*_bucket` metric of
 --     histogram the _bucket suffix will be removed.
 local function short_metric_name(full_name)
-  local labels_start, _ = full_name:find("{")
+  local labels_start, _ = utils.find(full_name, "{")
   if not labels_start then
     return full_name
   end
   -- Try to detect if this is a histogram metric. We only check for the
   -- `_bucket` suffix here, since it alphabetically goes before other
   -- histogram suffixes (`_count` and `_sum`).
-  local suffix_idx, _ = full_name:find("_bucket{")
-  if suffix_idx and full_name:find("le=") then
+  local suffix_idx, _ = utils.find(full_name, "_bucket{")
+
+  if suffix_idx and utils.find(full_name, "le=") then
     -- this is a histogram metric
     return full_name:sub(1, suffix_idx - 1)
   end
@@ -229,7 +231,7 @@ local function check_metric_and_label_names(metric_name, label_names)
   if not metric_name:match("^[a-zA-Z_:][a-zA-Z0-9_:]*$") then
     return "Metric name '" .. metric_name .. "' is invalid"
   end
-  if metric_name:find(KEY_INDEX_PREFIX) == 1 then
+  if utils.find(metric_name, KEY_INDEX_PREFIX) == 1 then
     return "Prefix '" .. KEY_INDEX_PREFIX .. "' is reserved for internal purposes"
   end
   for _, label_name in ipairs(label_names or {}) do
@@ -266,7 +268,7 @@ local function construct_bucket_format(buckets)
     local bucket_str = string.format("%f", bucket)
     local as_string = ngx_re_gsub(bucket_str, "0*$", "", "jo")
 
-    local dot_idx = as_string:find(".", 1, true)
+    local dot_idx = utils.find(as_string,".")
     max_order = math.max(max_order, dot_idx - 1)
     max_precision = math.max(max_precision, as_string:len() - dot_idx)
   end
@@ -278,21 +280,11 @@ end
 -- This function removes leading and trailing zeroes from `le` label values.
 --
 -- Args:
---   key: the metric key
+--   match: the result of regular matching histogram key, in the form of an array
 --
 -- Returns:
 --   (string) the formatted key
-local function fix_histogram_bucket_labels(key)
-  local match, err = ngx_re_match(key, METRICS_KEY_REGEX, "jo")
-  if err then
-    ngx.log(ngx.ERR, "failed to match regex: ", err)
-    return
-  end
-
-  if not match then
-    return key
-  end
-
+local function fix_histogram_bucket_labels(match)
   if match[2] == "Inf" then
     return table.concat({match[1], "+Inf", match[3]})
   else
@@ -829,25 +821,47 @@ function Prometheus:metric_data()
   local seen_metrics = {}
   local output = {}
   for _, key in ipairs(keys) do
+    utils.yield(true)
+
     local value, err = self.dict:get(key)
     if value then
-      local short_name = short_metric_name(key)
-      if not seen_metrics[short_name] then
+      local match, err = ngx_re_match(key, METRICS_KEY_REGEX, "jo")
+
+      if err then
+        ngx.log(ngx.ERR, "failed to match regex: ", err)
+        return
+      end
+
+      local has_seen = false
+      for seen_metric, _ in pairs(seen_metrics) do
+        if utils.has_prefix(key ,seen_metric) then
+          has_seen = true
+          break
+        end
+      end
+
+      if not has_seen then
+        local short_name = short_metric_name(key)
         local m = self.registry[short_name]
         if m then
           if m.help then
-            table.insert(output, string.format("# HELP %s%s %s\n",
+            utils.insert_tail(output, string.format("# HELP %s%s %s\n",
             self.prefix, short_name, m.help))
           end
           if m.typ then
-            table.insert(output, string.format("# TYPE %s%s %s\n",
+            utils.insert_tail(output, string.format("# TYPE %s%s %s\n",
               self.prefix, short_name, TYPE_LITERAL[m.typ]))
           end
         end
         seen_metrics[short_name] = true
       end
-      key = fix_histogram_bucket_labels(key)
-      table.insert(output, string.format("%s%s %s\n", self.prefix, key, value))
+
+      local fixed_key
+      if match then
+        fixed_key = fix_histogram_bucket_labels(match)
+      end
+
+      utils.insert_tail(output, string.format("%s%s %s\n", self.prefix, fixed_key or key, value))
     else
       if type(err) == "string" then
         self:log_error("Error getting '", key, "': ", err)

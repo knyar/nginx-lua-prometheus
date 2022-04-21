@@ -19,7 +19,6 @@
 
 local error            = error
 local type             = type
-local str_byte         = string.byte
 local str_find         = string.find
 local ffi              = require("ffi")
 local C                = ffi.C
@@ -27,7 +26,7 @@ local ngx              = ngx
 local ngx_sleep        = ngx.sleep
 local select           = select
 
-local YIELD_ITERATIONS = 500
+local YIELD_ITERATIONS = 100
 
 -- copy from https://github.com/apache/apisix/blob/release/2.13/apisix/core/string.lua#L32-L34
 ffi.cdef[[

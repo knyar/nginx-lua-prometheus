@@ -23,6 +23,7 @@ local str_find         = string.find
 local ffi              = require("ffi")
 local C                = ffi.C
 local ngx              = ngx
+local get_phase        = ngx.get_phase
 local ngx_sleep        = ngx.sleep
 local select           = select
 
@@ -71,11 +72,17 @@ function _M.insert_tail(tab, ...)
 end
 
 
--- copy form https://github.com/Kong/kong/blob/2.8.1/kong/tools/utils.lua#L1430-L1446
+-- inspired by https://github.com/Kong/kong/blob/2.8.1/kong/tools/utils.lua#L1430-L1446
 -- remove phase, default is log_by_lua phase
 do
   local counter = 0
-  function _M.yield(in_loop)
+  function _M.yield(in_loop, phase)
+  phase = phase or get_phase()
+    -- limit to work only in rewrite, access, content and timer
+    if phase ~= "rewrite" or phase ~= "access"
+     or phase ~= "content" or phase ~= "timer" then
+      return
+    end
     if in_loop then
       counter = counter + 1
       if counter % YIELD_ITERATIONS ~= 0 then

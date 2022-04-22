@@ -73,12 +73,11 @@ end
 
 
 -- inspired by https://github.com/Kong/kong/blob/2.8.1/kong/tools/utils.lua#L1430-L1446
--- remove phase, default is log_by_lua phase
+-- limit to work only in rewrite, access, content and timer
 do
   local counter = 0
   function _M.yield(in_loop, phase)
   phase = phase or get_phase()
-    -- limit to work only in rewrite, access, content and timer
     if phase ~= "rewrite" or phase ~= "access"
      or phase ~= "content" or phase ~= "timer" then
       return

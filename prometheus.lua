@@ -824,7 +824,6 @@ local yield
 do
   local counter = 0
   yield = function()
-  phase = phase or get_phase()
     if not can_yield_phases[get_phase()] then
       return
     end

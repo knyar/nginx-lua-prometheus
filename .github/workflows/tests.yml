@@ -1,10 +1,12 @@
 name: Run Tests
 on:
   push:
+  pull_request:
   schedule:
     # Run tests weekly to make sure they keep working despite various
     # dependency changes.
     - cron: '23 06 * * 5'
+  workflow_dispatch: # allow running manually
 jobs:
   lua:
     runs-on: ubuntu-latest

@@ -56,8 +56,16 @@
 -- increments. Copied from https://github.com/Kong/lua-resty-counter
 local resty_counter_lib = require("prometheus_resty_counter")
 local key_index_lib = require("prometheus_keys")
+local ngx = ngx
 local ngx_re_match = ngx.re.match
 local ngx_re_gsub = ngx.re.gsub
+local error = error
+local type = type
+local get_phase = ngx.get_phase
+local ngx_sleep = ngx.sleep
+local select = select
+
+local YIELD_ITERATIONS = 200
 
 local Prometheus = {}
 local mt = { __index = Prometheus }
@@ -69,6 +77,13 @@ local TYPE_LITERAL = {
   [TYPE_COUNTER]   = "counter",
   [TYPE_GAUGE]     = "gauge",
   [TYPE_HISTOGRAM] = "histogram",
+}
+
+local can_yield_phases = {
+    rewrite = true,
+    access = true,
+    content = true,
+    timer = true
 }
 
 -- Default name for error metric incremented by this library.
@@ -152,6 +167,17 @@ local function validate_utf8_string(str)
   return true
 end
 
+-- copy form https://github.com/apache/apisix/blob/release/2.13/apisix/core/table.lua#L50-L58
+local function table_insert_tail(tab, ...)
+    local idx = #tab
+    for i = 1, select('#', ...) do
+        idx = idx + 1
+        tab[idx] = select(i, ...)
+    end
+
+    return idx
+end
+
 -- Generate full metric name that includes all labels.
 --
 -- Args:
@@ -182,7 +208,7 @@ local function full_metric_name(name, label_names, label_values)
     else
       label_value = tostring(label_values[idx])
     end
-    table.insert(label_parts, key .. '="' .. label_value .. '"')
+    table_insert_tail(label_parts, key .. '="' .. label_value .. '"')
   end
   return name .. "{" .. table.concat(label_parts, ",") .. "}"
 end
@@ -792,6 +818,26 @@ local function register(self, name, help, label_names, buckets, typ)
   return metric
 end
 
+-- inspired by https://github.com/Kong/kong/blob/2.8.1/kong/tools/utils.lua#L1430-L1446
+-- limit to work only in rewrite, access, content and timer
+local yield
+do
+  local counter = 0
+  yield = function()
+    if not can_yield_phases[get_phase()] then
+      return
+    end
+
+    counter = counter + 1
+    if counter % YIELD_ITERATIONS ~= 0 then
+      return
+    end
+    counter = 0
+
+    ngx_sleep(0)
+  end
+end
+
 -- Public function to register a counter.
 function Prometheus:counter(name, help, label_names)
   return register(self, name, help, label_names, nil, TYPE_COUNTER)
@@ -829,6 +875,8 @@ function Prometheus:metric_data()
   local seen_metrics = {}
   local output = {}
   for _, key in ipairs(keys) do
+    yield()
+
     local value, err = self.dict:get(key)
     if value then
       local short_name = short_metric_name(key)
@@ -836,18 +884,18 @@ function Prometheus:metric_data()
         local m = self.registry[short_name]
         if m then
           if m.help then
-            table.insert(output, string.format("# HELP %s%s %s\n",
+            table_insert_tail(output, string.format("# HELP %s%s %s\n",
             self.prefix, short_name, m.help))
           end
           if m.typ then
-            table.insert(output, string.format("# TYPE %s%s %s\n",
+            table_insert_tail(output, string.format("# TYPE %s%s %s\n",
               self.prefix, short_name, TYPE_LITERAL[m.typ]))
           end
         end
         seen_metrics[short_name] = true
       end
       key = fix_histogram_bucket_labels(key)
-      table.insert(output, string.format("%s%s %s\n", self.prefix, key, value))
+      table_insert_tail(output, string.format("%s%s %s\n", self.prefix, key, value))
     else
       if type(err) == "string" then
         self:log_error("Error getting '", key, "': ", err)

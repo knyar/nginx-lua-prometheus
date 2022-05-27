@@ -4,6 +4,11 @@ This file only calls out major changes. Please see [the list of Git commits](
 https://github.com/knyar/nginx-lua-prometheus/commits/master) for the full list
 of changes.
 
+## 0.20220527
+
+Performance optimization aimed at decreasing impact that metric collection has
+on other requests (#139).
+
 ## 0.20220127
 
 Performance optimization of metric collection (#131).

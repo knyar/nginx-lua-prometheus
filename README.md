@@ -19,7 +19,7 @@ The library file - `prometheus.lua` - needs to be available in `LUA_PATH`. If
 this is the only Lua library you use, you can just point `lua_package_path` to
 the directory with this git repo checked out (see example below).
 
-OpenResty users will find this library in [opm](https://opm.openresty.org/). It
+OpenResty users will find this library in [opm](https://opm.openresty.org/package/knyar/nginx-lua-prometheus/). It
 is also available via
 [luarocks](https://luarocks.org/modules/knyar/nginx-lua-prometheus).
 

@@ -200,10 +200,12 @@ local function full_metric_name(name, label_names, label_values)
         label_value = string.sub(label_values[idx], 1, pos - 1)
                         :gsub("\\", "\\\\")
                         :gsub('"', '\\"')
+                        :gsub("\n", "\\n")
       else
         label_value = label_values[idx]
                         :gsub("\\", "\\\\")
                         :gsub('"', '\\"')
+                        :gsub("\n", "\\n")
       end
     else
       label_value = tostring(label_values[idx])

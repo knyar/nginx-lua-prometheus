@@ -527,7 +527,7 @@ local function set(self, value, label_values)
     self._log_error(err)
     return
   end
-  _, err = self._dict:safe_set(k, value)
+  _, err = self._dict:set(k, value)
   if err then
     self._log_error_kv(k, value, err)
   end
@@ -632,7 +632,7 @@ local function reset(self)
       end
       if remove then
         self._key_index:remove(key)
-        local _, err = self._dict:safe_set(key, nil)
+        local _, err = self._dict:set(key, nil)
         if err then
           self._log_error("Error resetting '", key, "': ", err)
         end

@@ -431,9 +431,9 @@ local function inc_gauge(self, value, label_values)
     return
   end
 
-  _, err, _ = self._dict:incr(k, value, 0)
-  if err then
-    self._log_error_kv(k, value, err)
+  _, err, forcible = self._dict:incr(k, value, 0)
+  if err or forcible then
+    self._log_error_kv(k, value, err or "lru eviction")
   end
 end
 
@@ -527,9 +527,9 @@ local function set(self, value, label_values)
     self._log_error(err)
     return
   end
-  _, err = self._dict:set(k, value)
-  if err then
-    self._log_error_kv(k, value, err)
+  _, err, forcible = self._dict:set(k, value)
+  if err or forcible then
+    self._log_error_kv(k, value, err or "lru eviction")
   end
 end
 

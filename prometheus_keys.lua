@@ -85,7 +85,11 @@ function KeyIndex:add(key_or_keys)
         break
       end
       N = N+1
-      local ok, err = self.dict:add(self.key_prefix .. N, key)
+      local ok, err, forcible = self.dict:add(self.key_prefix .. N, key)
+      if forcible then
+          ngx.log(ngx.ERR, "key index: add key: shdict lru eviction: idx=",
+                  self.key_prefix .. N, ", key=", key)
+      end
       if ok then
         self.dict:incr(self.key_count, 1, 0)
         self.keys[N] = key

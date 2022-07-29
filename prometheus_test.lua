@@ -14,17 +14,11 @@ function SimpleDict:safe_set(k, v)
   self:set(k, v)
   return true, nil  -- ok, err
 end
-function SimpleDict:safe_add(k, v)
-  if k == "willnotfit" or v == "willnotfit" then
-    return nil, "no memory"
-  end
-  self:set(k, v)
+function SimpleDict:add(k, v)
+  self:add(k, v)
   return true, nil  -- ok, err
 end
 function SimpleDict:incr(k, v, init)
-  if k:find("willnotfit") then
-    return nil, "no memory"
-  end
   if not self.dict[k] then self.dict[k] = init end
   self.dict[k] = self.dict[k] + (v or 1)
   return self.dict[k], nil  -- newval, err
@@ -167,17 +161,6 @@ function TestPrometheus.testErrorUnknownDict()
   local pok, perr = pcall(require('prometheus').init, "nonexistent")
   luaunit.assertEquals(pok, false)
   luaunit.assertStrContains(perr, "does not seem to exist")
-end
-function TestPrometheus:testErrorNoMemory()
-  local gauge3 = self.p:gauge("willnotfit")
-  self.counter1:inc(5)
-  gauge3:inc(1)
-
-  self.p._counter:sync()
-  luaunit.assertEquals(self.dict:get("metric1"), 5)
-  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 1)
-  luaunit.assertEquals(self.dict:get("willnotfit"), nil)
-  luaunit.assertEquals(#ngx.logs, 1)
 end
 function TestPrometheus:testErrorInvalidMetricName()
   self.p:histogram("name with a space", "Histogram")
@@ -702,11 +685,6 @@ function TestKeyIndex:testAdd()
   -- adding already existing key should do nothing
   self.key_index:add("single")
   luaunit.assertEquals(ngx.logs, nil)
-  luaunit.assertEquals(self.dict:get("_prefix_key_count"), 3)
-
-  -- error should be returned when memory is full
-  local err = self.key_index:add("willnotfit")
-  luaunit.assertEquals(err, "Unexpected error adding a key: no memory")
   luaunit.assertEquals(self.dict:get("_prefix_key_count"), 3)
 end
 function TestKeyIndex:testRemove()

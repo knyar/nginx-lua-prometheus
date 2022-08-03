@@ -424,16 +424,16 @@ end
 --   value: numeric value to increment by. Can be negative.
 --   label_values: a list of label values, in the same order as label keys.
 local function inc_gauge(self, value, label_values)
-  local k, err, _
+  local k, err, _, forcible
   k, err = lookup_or_create(self, label_values)
   if err then
     self._log_error(err)
     return
   end
 
-  _, err, _ = self._dict:incr(k, value, 0)
-  if err then
-    self._log_error_kv(k, value, err)
+  _, err, forcible = self._dict:incr(k, value, 0)
+  if err or forcible then
+    self._log_error_kv(k, value, err or "lru eviction")
   end
 end
 
@@ -521,15 +521,15 @@ local function set(self, value, label_values)
     return
   end
 
-  local k, _, err
+  local k, _, err, forcible
   k, err = lookup_or_create(self, label_values)
   if err then
     self._log_error(err)
     return
   end
-  _, err = self._dict:safe_set(k, value)
-  if err then
-    self._log_error_kv(k, value, err)
+  _, err, forcible = self._dict:set(k, value)
+  if err or forcible then
+    self._log_error_kv(k, value, err or "lru eviction")
   end
 end
 
@@ -632,7 +632,7 @@ local function reset(self)
       end
       if remove then
         self._key_index:remove(key)
-        local _, err = self._dict:safe_set(key, nil)
+        local _, err = self._dict:set(key, nil)
         if err then
           self._log_error("Error resetting '", key, "': ", err)
         end

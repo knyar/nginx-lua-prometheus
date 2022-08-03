@@ -85,7 +85,11 @@ function KeyIndex:add(key_or_keys)
         break
       end
       N = N+1
-      local ok, err = self.dict:safe_add(self.key_prefix .. N, key)
+      local ok, err, forcible = self.dict:add(self.key_prefix .. N, key)
+      if forcible then
+          ngx.log(ngx.ERR, "key index: add key: shdict lru eviction: idx=",
+                  self.key_prefix .. N, ", key=", key)
+      end
       if ok then
         self.dict:incr(self.key_count, 1, 0)
         self.keys[N] = key
@@ -107,7 +111,7 @@ function KeyIndex:remove(key)
   if i then
     self.index[key] = nil
     self.keys[i] = nil
-    self.dict:safe_set(self.key_prefix .. i, nil)
+    self.dict:set(self.key_prefix .. i, nil)
     -- increment delete_count to signalize other workers that they should do a full sync
     self.dict:incr(self.delete_count, 1, 0)
     self.deleted = self.deleted + 1

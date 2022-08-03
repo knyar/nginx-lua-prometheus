@@ -15,7 +15,7 @@ function SimpleDict:safe_set(k, v)
   return true, nil  -- ok, err
 end
 function SimpleDict:add(k, v)
-  self:add(k, v)
+  self:set(k, v)
   return true, nil  -- ok, err
 end
 function SimpleDict:incr(k, v, init)

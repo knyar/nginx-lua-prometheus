@@ -424,7 +424,7 @@ end
 --   value: numeric value to increment by. Can be negative.
 --   label_values: a list of label values, in the same order as label keys.
 local function inc_gauge(self, value, label_values)
-  local k, err, _
+  local k, err, _, forcible
   k, err = lookup_or_create(self, label_values)
   if err then
     self._log_error(err)
@@ -521,7 +521,7 @@ local function set(self, value, label_values)
     return
   end
 
-  local k, _, err
+  local k, _, err, forcible
   k, err = lookup_or_create(self, label_values)
   if err then
     self._log_error(err)

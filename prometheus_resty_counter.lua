@@ -31,7 +31,7 @@ local timer_started = {}
 local id
 
 local function sync(_, self)
-  local err, _
+  local err, _, forcible
   local ok = true
   for k, v in pairs(self.increments) do
     _, err, forcible = self.dict:incr(k, v, 0)

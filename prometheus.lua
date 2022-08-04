@@ -101,6 +101,15 @@ local KEY_INDEX_PREFIX = "__ngx_prom__"
 
 local METRICS_KEY_REGEX = [[(.*[,{]le=")(.*)(".*)]]
 
+local ERR_MSG_COUNTER_NOT_INITIALIZED = "counter not initialized! " ..
+  "Have you called Prometheus:init() from the " ..
+  "init_worker_by_lua_block nginx phase?"
+
+-- Error message that gets logged when the shared dictionary gets full.
+local ERR_MSG_LRU_EVICTION = "Shared dictionary used for prometheus metrics " ..
+  "is full. REPORTED METRIC DATA MIGHT BE INCOMPLETE. Please increase the " ..
+  "size of the dictionary or decrease metric cardinality."
+
 -- Accepted range of byte values for tailing bytes of utf8 strings.
 -- This is defined outside of the validate_utf8_string function as a const
 -- variable to avoid creating and destroying table frequently.
@@ -407,7 +416,7 @@ local function lookup_or_create(self, label_values)
     full_name = full_metric_name(self.name, self.label_names, label_values)
   end
   t[LEAF_KEY] = full_name
-  local err = self._key_index:add(full_name)
+  local err = self._key_index:add(full_name, ERR_MSG_LRU_EVICTION)
   if err then
     return nil, err
   end
@@ -433,13 +442,9 @@ local function inc_gauge(self, value, label_values)
 
   _, err, forcible = self._dict:incr(k, value, 0)
   if err or forcible then
-    self._log_error_kv(k, value, err or "lru eviction")
+    self._log_error_kv(k, value, err or ERR_MSG_LRU_EVICTION)
   end
 end
-
-local ERR_MSG_COUNTER_NOT_INITIALIZED = "counter not initialized! " ..
-  "Have you called Prometheus:init() from the " ..
-  "init_worker_by_lua_block nginx phase?"
 
 -- Increment a counter metric.
 --
@@ -502,7 +507,11 @@ local function del(self, label_values)
     ngx.sleep(self.parent.sync_interval)
   end
 
-  self._key_index:remove(k)
+  err = self._key_index:remove(k, ERR_MSG_LRU_EVICTION)
+  if err then
+    self._log_error(err)
+  end
+
   _, err = self._dict:delete(k)
   if err then
     self._log_error("Error deleting key: ".. k .. ": " .. err)
@@ -529,7 +538,7 @@ local function set(self, value, label_values)
   end
   _, err, forcible = self._dict:set(k, value)
   if err or forcible then
-    self._log_error_kv(k, value, err or "lru eviction")
+    self._log_error_kv(k, value, err or ERR_MSG_LRU_EVICTION)
   end
 end
 
@@ -631,8 +640,13 @@ local function reset(self)
         end
       end
       if remove then
-        self._key_index:remove(key)
-        local _, err = self._dict:set(key, nil)
+        local _, err
+        err = self._key_index:remove(key, ERR_MSG_LRU_EVICTION)
+        if err then
+          self._log_error(err)
+        end
+
+        _, err = self._dict:set(key, nil)
         if err then
           self._log_error("Error resetting '", key, "': ", err)
         end
@@ -695,7 +709,7 @@ function Prometheus.init(dict_name, options_or_prefix)
 
   self:counter(self.error_metric_name, "Number of nginx-lua-prometheus errors")
   self.dict:set(self.error_metric_name, 0)
-  local err = self.key_index:add(self.error_metric_name)
+  local err = self.key_index:add(self.error_metric_name, ERR_MSG_LRU_EVICTION)
   if err then
     self:log_error(err)
   end

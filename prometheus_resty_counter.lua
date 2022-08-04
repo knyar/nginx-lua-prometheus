@@ -36,10 +36,10 @@ local function sync(_, self)
   for k, v in pairs(self.increments) do
     _, err, forcible = self.dict:incr(k, v, 0)
     if forcible then
-      ngx.log(ngx.WARN, "increasing counter in shdict: lru eviction: key=", k)
+      ngx.log(ngx.ERR, "increasing counter in shdict: lru eviction: key=", k)
     end
     if err then
-      ngx.log(ngx.WARN, "error increasing counter in shdict key: ", k, ", err: ", err)
+      ngx.log(ngx.ERR, "error increasing counter in shdict key: ", k, ", err: ", err)
       ok = false
     end
   end

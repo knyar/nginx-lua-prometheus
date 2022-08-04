@@ -71,7 +71,7 @@ end
 --
 -- Returns:
 --   nil on success, string with error message otherwise
-function KeyIndex:add(key_or_keys)
+function KeyIndex:add(key_or_keys, err_msg_lru_eviction)
   local keys = key_or_keys
   if type(key_or_keys) == "string" then
     keys = { key_or_keys }
@@ -86,14 +86,14 @@ function KeyIndex:add(key_or_keys)
       end
       N = N+1
       local ok, err, forcible = self.dict:add(self.key_prefix .. N, key)
-      if forcible then
-          ngx.log(ngx.ERR, "key index: add key: shdict lru eviction: idx=",
-                  self.key_prefix .. N, ", key=", key)
-      end
       if ok then
-        self.dict:incr(self.key_count, 1, 0)
+        local _, _, forcible2 = self.dict:incr(self.key_count, 1, 0)
         self.keys[N] = key
         self.index[key] = N
+        if forcible or forcible2 then
+          return (err_msg_lru_eviction .. "; key index: add key: idx=" ..
+            self.key_prefix .. N .. ", key=" .. key)
+        end
         break
       elseif err ~= "exists" then
         return "Unexpected error adding a key: " .. err
@@ -106,15 +106,19 @@ end
 --
 -- Args:
 --   key: String value of the key, must exists in this index.
-function KeyIndex:remove(key)
+function KeyIndex:remove(key, err_msg_lru_eviction)
   local i = self.index[key]
   if i then
     self.index[key] = nil
     self.keys[i] = nil
     self.dict:set(self.key_prefix .. i, nil)
-    -- increment delete_count to signalize other workers that they should do a full sync
-    self.dict:incr(self.delete_count, 1, 0)
     self.deleted = self.deleted + 1
+
+    -- increment delete_count to signalize other workers that they should do a full sync
+    local _, err, forcible = self.dict:incr(self.delete_count, 1, 0)
+    if err or forcible then
+      return err or err_msg_lru_eviction
+    end
   else
     ngx.log(ngx.ERR, "Trying to remove non-existent key: ", key)
   end

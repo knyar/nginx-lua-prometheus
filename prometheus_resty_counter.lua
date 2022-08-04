@@ -37,6 +37,7 @@ local function sync(_, self)
     _, err, forcible = self.dict:incr(k, v, 0)
     if forcible then
       ngx.log(ngx.ERR, "increasing counter in shdict: lru eviction: key=", k)
+      ok = false
     end
     if err then
       ngx.log(ngx.ERR, "error increasing counter in shdict key: ", k, ", err: ", err)
@@ -45,10 +46,14 @@ local function sync(_, self)
   end
 
   clear_tab(self.increments)
+  if ok == false then
+    self.dict:incr(self.error_metric_name, 1, 0)
+  end
+
   return ok
 end
 
-function _M.new(shdict_name, sync_interval)
+function _M.new(shdict_name, sync_interval, error_metric_name)
   id = ngx.worker.id()
 
   if not ngx_shared[shdict_name] then
@@ -62,6 +67,7 @@ function _M.new(shdict_name, sync_interval)
   local self = setmetatable({
     dict = ngx_shared[shdict_name],
     increments = increments[shdict_name],
+    error_metric_name = error_metric_name,
   }, mt)
 
   if sync_interval then

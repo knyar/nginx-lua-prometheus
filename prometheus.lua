@@ -742,7 +742,7 @@ function Prometheus:init_worker(sync_interval)
   end
   self.sync_interval = sync_interval or DEFAULT_SYNC_INTERVAL
   local counter_instance, err = resty_counter_lib.new(
-      self.dict_name, self.sync_interval)
+      self.dict_name, self.sync_interval, self.error_metric_name)
   if err then
     error(err, 2)
   end

@@ -364,6 +364,12 @@ local function lookup_or_create(self, label_values)
     return nil, string.format("inconsistent labels count, expected %d, got %d",
                               self.label_count, cnt)
   end
+
+  if self.lookup_size > self.lookup_max_size then
+    self.lookup_size = 0
+    self.lookup = {}
+  end
+
   local t = self.lookup
   if label_values then
     -- Don't use ipairs here to avoid inner loop generates trace first
@@ -416,6 +422,9 @@ local function lookup_or_create(self, label_values)
     full_name = full_metric_name(self.name, self.label_names, label_values)
   end
   t[LEAF_KEY] = full_name
+
+  self.lookup_size = self.lookup_size + 1
+
   local err = self._key_index:add(full_name, ERR_MSG_LRU_EVICTION)
   if err then
     return nil, err
@@ -763,7 +772,7 @@ end
 --
 -- Returns:
 --   a new metric object.
-local function register(self, name, help, label_names, buckets, typ)
+local function register(self, name, help, label_names, buckets, typ, lookup_max_size)
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")
     return
@@ -807,6 +816,8 @@ local function register(self, name, help, label_names, buckets, typ)
     -- ['my.net']['200'][LEAF_KEY] = 'http_count{host="my.net",status="200"}'
     -- ['my.net']['500'][LEAF_KEY] = 'http_count{host="my.net",status="500"}'
     lookup = {},
+    lookup_size = 0,
+    lookup_max_size = lookup_max_size or 100,
     parent = self,
     -- Store a reference for logging functions for faster lookup.
     _log_error = function(...) self:log_error(...) end,
@@ -855,18 +866,18 @@ do
 end
 
 -- Public function to register a counter.
-function Prometheus:counter(name, help, label_names)
-  return register(self, name, help, label_names, nil, TYPE_COUNTER)
+function Prometheus:counter(name, help, label_names, lookup_max_size)
+  return register(self, name, help, label_names, nil, TYPE_COUNTER, lookup_max_size)
 end
 
 -- Public function to register a gauge.
-function Prometheus:gauge(name, help, label_names)
-  return register(self, name, help, label_names, nil, TYPE_GAUGE)
+function Prometheus:gauge(name, help, label_names, lookup_max_size)
+  return register(self, name, help, label_names, nil, TYPE_GAUGE, lookup_max_size)
 end
 
 -- Public function to register a histogram.
-function Prometheus:histogram(name, help, label_names, buckets)
-  return register(self, name, help, label_names, buckets, TYPE_HISTOGRAM)
+function Prometheus:histogram(name, help, label_names, buckets, lookup_max_size)
+  return register(self, name, help, label_names, buckets, TYPE_HISTOGRAM, lookup_max_size)
 end
 
 -- Prometheus compatible metric data as an array of strings.

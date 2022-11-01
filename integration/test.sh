@@ -23,7 +23,7 @@ function cleanup {
 cleanup
 trap cleanup EXIT
 
-docker run -d --name ${container_name} -p 18001:18001 -p 18002:18002 -p 18003:18003 \
+docker run -d --name ${container_name} -p 18001:18001 -p 18002:18002 \
   -v "${base_dir}/../:/nginx-lua-prometheus" ${image_name} \
   nginx -c /nginx-lua-prometheus/integration/nginx.conf
 

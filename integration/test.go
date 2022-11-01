@@ -118,10 +118,10 @@ func checkBucketBoundaries(mfs map[string]*dto.MetricFamily, metric string) erro
 
 func get_lookup_size(client *http.Client) *LookupSizeInfo {
     resp, err := client.Get("http://localhost:18003/get_lookup_size")
-    defer resp.Body.Close()
     if err != nil {
         log.Fatal(err)
     }
+    defer resp.Body.Close()
     body, err := ioutil.ReadAll(resp.Body)
     if err != nil {
         log.Fatal(err)

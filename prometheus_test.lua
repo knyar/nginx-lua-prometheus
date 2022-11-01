@@ -802,4 +802,42 @@ function TestKeyIndex:testSync()
   luaunit.assertEquals(keys[2], "key3")
 end
 
+function TestPrometheus:testLookupMaxSize()
+  local c = self.p:counter("testc", "Counter", {"tag"})
+  local g = self.p:gauge("testg", "Gauge", {"tag"})
+  local h = self.p:histogram("testh", "Histogram", {"tag"})
+
+  luaunit.assertEquals(c.lookup_size, 0)
+  luaunit.assertEquals(g.lookup_size, 0)
+  luaunit.assertEquals(h.lookup_size, 0)
+  luaunit.assertEquals(c.lookup_max_size, 1000)
+  luaunit.assertEquals(g.lookup_max_size, 1000)
+  luaunit.assertEquals(h.lookup_max_size, 1000)
+
+  for _, max_size in ipairs({10, 17, 101}) do
+    local p1 = require('prometheus').init("metrics",
+      {lookup_max_size=max_size})
+    local c1 = p1:counter("testc1", "Counter", {"tag"})
+    local g1 = p1:gauge("testg1", "Gauge", {"tag"})
+    local h1 = p1:histogram("testh1", "Histogram", {"tag"})
+
+    luaunit.assertEquals(p1.lookup_max_size, max_size)
+    luaunit.assertEquals(c1.lookup_max_size, max_size)
+    luaunit.assertEquals(g1.lookup_max_size, max_size)
+    luaunit.assertEquals(h1.lookup_max_size, max_size)
+
+    for i = 0, max_size * 2.1, 1 do
+      c1:inc(1, {tostring(i)})
+      g1:set(3, {tostring(i)})
+      h1:observe(50, {tostring(i)})
+
+      luaunit.assertEquals(c1.lookup_size, (i % max_size)+1)
+      luaunit.assertEquals(g1.lookup_size, (i % max_size)+1)
+      luaunit.assertEquals(h1.lookup_size, (i % max_size)+1)
+    end
+  end
+
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+end
+
 os.exit(luaunit.run())

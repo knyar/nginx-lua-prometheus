@@ -2,7 +2,6 @@
 package main
 
 import (
-    "encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -20,12 +19,6 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 )
-
-type LookupSizeInfo struct {
-    Counter     int      `json:"metric_counter_dummy"`
-    Gauge       int      `json:"metric_gauge_dummy"`
-    Histogram   int      `json:"metric_histogram_dummy"`
-}
 
 var (
 	testDuration = flag.Duration("duration", 10*time.Second, "duration of the test")
@@ -114,26 +107,6 @@ func checkBucketBoundaries(mfs map[string]*dto.MetricFamily, metric string) erro
 	}
 
 	return nil
-}
-
-func get_lookup_size(client *http.Client) *LookupSizeInfo {
-    resp, err := client.Get("http://localhost:18003/get_lookup_size")
-    if err != nil {
-        log.Fatal(err)
-    }
-    if resp.StatusCode != 200 {
-        log.Fatal("update metric failed")
-    }
-    defer resp.Body.Close()
-    body, err := ioutil.ReadAll(resp.Body)
-    if err != nil {
-        log.Fatal(err)
-    }
-    info := &LookupSizeInfo{}
-    if err := json.Unmarshal(body, info); err != nil {
-        log.Fatal(err)
-    }
-    return info
 }
 
 func main() {
@@ -275,28 +248,6 @@ func main() {
 	if err := checkBucketBoundaries(mfs, "request_duration_seconds"); err != nil {
 		log.Fatal(err)
 	}
-
-    // check lookup table if truncated
-    info := get_lookup_size(client)
-    if info.Counter != 0 || info.Gauge != 0 || info.Histogram != 0 {
-        log.Fatal("wrong initial lookup_size")
-    }
-    for i := 0; i <= 1000; i++ {
-        resp, err := client.Get(fmt.Sprintf("http://localhost:18003/update?tag=%d", i))
-        if err != nil {
-            log.Fatal(err)
-        }
-        if resp.StatusCode != 200 {
-            log.Fatal("update metric failed")
-        }
-        resp.Body.Close()
-
-        info := get_lookup_size(client)
-        j := i % 1000 + 1;
-        if info.Counter != j || info.Gauge != j || info.Histogram != j {
-            log.Fatalf("metric lookup table not updated: %+v\n", info)
-        }
-    }
 
 	log.Print("All ok")
 }

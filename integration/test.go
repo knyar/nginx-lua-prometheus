@@ -121,6 +121,9 @@ func get_lookup_size(client *http.Client) *LookupSizeInfo {
     if err != nil {
         log.Fatal(err)
     }
+    if resp.StatusCode != 200 {
+        log.Fatal("update metric failed")
+    }
     defer resp.Body.Close()
     body, err := ioutil.ReadAll(resp.Body)
     if err != nil {
@@ -283,18 +286,15 @@ func main() {
         if err != nil {
             log.Fatal(err)
         }
+        if resp.StatusCode != 200 {
+            log.Fatal("update metric failed")
+        }
         resp.Body.Close()
 
-        if i == 999 {
-            info := get_lookup_size(client)
-            if info.Counter != 1000 || info.Gauge != 1000 || info.Histogram != 1000 {
-                log.Fatalf("metric lookup table not updated: %+v\n", info)
-            }
-        } else if i == 1000 {
-            info := get_lookup_size(client)
-            if info.Counter != 1 || info.Gauge != 1 || info.Histogram != 1 {
-                log.Fatalf("metric lookup table not truncated: %+v\n", info)
-            }
+        info := get_lookup_size(client)
+        j := i % 1000 + 1;
+        if info.Counter != j || info.Gauge != j || info.Histogram != j {
+            log.Fatalf("metric lookup table not updated: %+v\n", info)
         }
     }
 

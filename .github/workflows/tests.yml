@@ -28,6 +28,7 @@ jobs:
       - run: luarocks install luacov-coveralls
       - run: luarocks install luaunit
       - run: luarocks install lrexlib-pcre2
+      - run: luarocks install lua-cjson
       - run: luacheck --globals ngx -- prometheus.lua prometheus_keys.lua prometheus_resty_counter.lua
       - run: luacheck --globals luaunit rex_pcre2 ngx TestPrometheus TestKeyIndex -- prometheus_test.lua
       - run: lua -lluacov prometheus_test.lua

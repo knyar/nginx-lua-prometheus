@@ -92,6 +92,9 @@ local DEFAULT_ERROR_METRIC_NAME = "nginx_metric_errors_total"
 -- Default value for per-worker counter sync interval (seconds).
 local DEFAULT_SYNC_INTERVAL = 1
 
+-- Default max size of lookup table
+local DEFAULT_LOOKUP_MAX_SIZE = 1000
+
 -- Default set of latency buckets, 5ms to 10s:
 local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
                          0.4, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5, 10}
@@ -365,7 +368,7 @@ local function lookup_or_create(self, label_values)
                               self.label_count, cnt)
   end
 
-  if self.lookup_size > self.lookup_max_size then
+  if self.lookup_size >= self.lookup_max_size then
     self.lookup_size = 0
     self.lookup = {}
   end
@@ -705,10 +708,13 @@ function Prometheus.init(dict_name, options_or_prefix)
       DEFAULT_ERROR_METRIC_NAME
     self.sync_interval = options_or_prefix.sync_interval or
       DEFAULT_SYNC_INTERVAL
+    self.lookup_max_size = options_or_prefix.lookup_max_size or
+      DEFAULT_LOOKUP_MAX_SIZE
   else
     self.prefix = options_or_prefix or ''
     self.error_metric_name = DEFAULT_ERROR_METRIC_NAME
     self.sync_interval = DEFAULT_SYNC_INTERVAL
+    self.lookup_max_size = DEFAULT_LOOKUP_MAX_SIZE
   end
 
   self.registry = {}
@@ -772,7 +778,7 @@ end
 --
 -- Returns:
 --   a new metric object.
-local function register(self, name, help, label_names, buckets, typ, lookup_max_size)
+local function register(self, name, help, label_names, buckets, typ)
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")
     return
@@ -817,7 +823,7 @@ local function register(self, name, help, label_names, buckets, typ, lookup_max_
     -- ['my.net']['500'][LEAF_KEY] = 'http_count{host="my.net",status="500"}'
     lookup = {},
     lookup_size = 0,
-    lookup_max_size = lookup_max_size or 100,
+    lookup_max_size = self.lookup_max_size,
     parent = self,
     -- Store a reference for logging functions for faster lookup.
     _log_error = function(...) self:log_error(...) end,
@@ -866,18 +872,18 @@ do
 end
 
 -- Public function to register a counter.
-function Prometheus:counter(name, help, label_names, lookup_max_size)
-  return register(self, name, help, label_names, nil, TYPE_COUNTER, lookup_max_size)
+function Prometheus:counter(name, help, label_names)
+  return register(self, name, help, label_names, nil, TYPE_COUNTER)
 end
 
 -- Public function to register a gauge.
-function Prometheus:gauge(name, help, label_names, lookup_max_size)
-  return register(self, name, help, label_names, nil, TYPE_GAUGE, lookup_max_size)
+function Prometheus:gauge(name, help, label_names)
+  return register(self, name, help, label_names, nil, TYPE_GAUGE)
 end
 
 -- Public function to register a histogram.
-function Prometheus:histogram(name, help, label_names, buckets, lookup_max_size)
-  return register(self, name, help, label_names, buckets, TYPE_HISTOGRAM, lookup_max_size)
+function Prometheus:histogram(name, help, label_names, buckets)
+  return register(self, name, help, label_names, buckets, TYPE_HISTOGRAM)
 end
 
 -- Prometheus compatible metric data as an array of strings.

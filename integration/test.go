@@ -288,7 +288,7 @@ func main() {
         if i == 999 {
             info := get_lookup_size(client)
             if info.Counter != 1000 || info.Gauge != 1000 || info.Histogram != 1000 {
-                log.Fatal("metric lookup table not updated")
+                log.Fatalf("metric lookup table not updated: %+v\n", info)
             }
         } else if i == 1000 {
             info := get_lookup_size(client)

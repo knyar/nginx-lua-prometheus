@@ -4,6 +4,13 @@ This file only calls out major changes. Please see [the list of Git commits](
 https://github.com/knyar/nginx-lua-prometheus/commits/master) for the full list
 of changes.
 
+## 0.20221218
+
+- Added escaping of newline characters in label values (#145).
+- Improved detection of LRU evictions (#147, #148).
+- Per-worker metric name lookup tables now have a bounded size aimed at preventing
+  memory leaking in environments with high metric churn (#151).
+
 ## 0.20220527
 
 Performance optimization aimed at decreasing impact that metric collection has

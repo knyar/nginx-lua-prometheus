@@ -840,4 +840,14 @@ function TestPrometheus:testLookupMaxSize()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 end
 
+function TestPrometheus:testPrintfTable()
+  local p = require('prometheus')
+  luaunit.assertEquals(p._table_to_string(nil), "nil")
+  luaunit.assertEquals(p._table_to_string({}), "<>")
+  luaunit.assertEquals(p._table_to_string({"foo"}), "<foo>")
+  luaunit.assertEquals(p._table_to_string({"foo",2,"bar"}), "<foo,2,bar>")
+  -- table ends at the first value before nil.
+  luaunit.assertEquals(p._table_to_string({nil,2,nil,"foo",nil}), "<nil,2>")
+end
+
 os.exit(luaunit.run())

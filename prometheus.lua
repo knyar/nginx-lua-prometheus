@@ -190,6 +190,24 @@ local function table_insert_tail(tab, ...)
     return idx
 end
 
+-- Return table as a string. Nested tables are not expanded.
+local function table_to_string(t)
+  if t == nil then
+    return "nil"
+  end
+
+  local buf = "<"
+  for i = 1, #t do
+    buf = buf .. tostring(t[i])
+    if i < #t then
+      buf = buf .. ","
+    end
+  end
+  return buf .. ">"
+end
+-- Export to allow testing.
+function Prometheus._table_to_string(t) return table_to_string(t) end
+
 -- Generate full metric name that includes all labels.
 --
 -- Args:
@@ -366,7 +384,7 @@ local function lookup_or_create(self, label_values)
   if cnt ~= self.label_count or (self.label_count > 0 and not label_values[1]) then
     return nil, string.format(
       "incorrect label count for metric %s, expected %d, got %d (%s)",
-      self.name, self.label_count, cnt, table.concat(label_values, ","))
+      self.name, self.label_count, cnt, table_to_string(label_values))
   end
 
   if self.lookup_size >= self.lookup_max_size then
@@ -851,6 +869,7 @@ local function register(self, name, help, label_names, buckets, typ)
   self.registry[name] = metric
   return metric
 end
+
 
 -- inspired by https://github.com/Kong/kong/blob/2.8.1/kong/tools/utils.lua#L1430-L1446
 -- limit to work only in rewrite, access, content and timer

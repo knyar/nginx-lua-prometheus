@@ -364,8 +364,9 @@ local function lookup_or_create(self, label_values)
   local cnt = label_values and #label_values or 0
   -- specially, if first element is nil, # will treat it as "non-empty"
   if cnt ~= self.label_count or (self.label_count > 0 and not label_values[1]) then
-    return nil, string.format("inconsistent labels count, expected %d, got %d",
-                              self.label_count, cnt)
+    return nil, string.format(
+      "incorrect label count for metric %s, expected %d, got %d (%s)",
+      self.name, self.label_count, cnt, table.concat(label_values, ","))
   end
 
   if self.lookup_size >= self.lookup_max_size then

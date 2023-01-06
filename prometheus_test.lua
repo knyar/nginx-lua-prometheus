@@ -840,7 +840,7 @@ function TestPrometheus:testLookupMaxSize()
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 end
 
-function TestPrometheus:testPrintfTable()
+function TestPrometheus.testPrintfTable()
   local p = require('prometheus')
   luaunit.assertEquals(p._table_to_string(nil), "nil")
   luaunit.assertEquals(p._table_to_string({}), "<>")

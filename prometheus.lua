@@ -376,12 +376,8 @@ end
 --     [1]: full name of the _sum histogram metric;
 --     [...]: full names of each _bucket metrics.
 local function lookup_or_create(self, label_values)
-  -- If one of the `label_values` is nil, #label_values will return the number
-  -- of non-nil labels in the beginning of the list. This will make us return an
-  -- error here as well.
   local cnt = label_values and #label_values or 0
-  -- specially, if first element is nil, # will treat it as "non-empty"
-  if cnt ~= self.label_count or (self.label_count > 0 and not label_values[1]) then
+  if cnt ~= self.label_count then
     return nil, string.format(
       "incorrect label count for metric %s, expected %d, got %d (%s)",
       self.name, self.label_count, cnt, table_to_string(label_values))
@@ -402,6 +398,10 @@ local function lookup_or_create(self, label_values)
     local label
     for i=1, self.label_count do
       label = label_values[i]
+      if label == nil then
+        return nil, string.format("unexpected nil value for label %s of %s",
+          self.label_names[i], self.name)
+      end
       if not t[label] then
         t[label] = {}
       end

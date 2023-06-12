@@ -11,7 +11,7 @@ expose them on a separate web page to be pulled by
 To use this library, you will need the [ngx_lua](
 https://github.com/openresty/lua-nginx-module) nginx module. You can either use
 a lua-enabled nginx-based server like [OpenResty](https://openresty.org/en/),
-or a regulal nginx server with the module enabled: for example, on Debian 10 you
+or a regular nginx server with the module enabled: for example, on Debian 10 you
 can simply install `libnginx-mod-http-lua` (but please read the [known issues](
 #known-issues) if you use a later Debian version).
 

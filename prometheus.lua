@@ -607,6 +607,9 @@ local function observe(self, value, label_values)
   -- _sum metric.
   c:incr(keys[2], value)
 
+  -- the last bucket (le="Inf").
+  c:incr(keys[self.bucket_count+3], 1)
+
   local seen = false
   -- check in reverse order, otherwise we will always
   -- need to traverse the whole table.
@@ -618,8 +621,6 @@ local function observe(self, value, label_values)
       break
     end
   end
-  -- the last bucket (le="Inf").
-  c:incr(keys[self.bucket_count+3], 1)
 end
 
 -- Delete all metrics for a given gauge, counter or a histogram.

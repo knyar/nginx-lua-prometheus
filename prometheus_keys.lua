@@ -4,6 +4,7 @@
 -- using ngx.shared.dict:get_keys (see https://github.com/openresty/lua-nginx-module#ngxshareddictget_keys),
 -- which blocks all workers and therefore it shouldn't be used with large
 -- amounts of keys.
+local ngx_sleep = ngx.sleep
 
 local KeyIndex = {}
 KeyIndex.__index = KeyIndex
@@ -16,6 +17,7 @@ function KeyIndex.new(shared_dict, prefix)
   self.key_count = prefix .. "key_count"
   self.last = 0
   self.deleted = 0
+  self.not_expired_index = 1
   self.keys = {}
   self.index = {}
   return self
@@ -33,6 +35,7 @@ function KeyIndex:sync()
     -- Sync only new keys, if there are any.
     self:sync_range(self.last, N)
   end
+  self:sync_expired(N)
   return N
 end
 
@@ -48,8 +51,37 @@ function KeyIndex:sync_range(first, last)
       self.index[self.keys[i]] = nil
       self.keys[i] = nil
     end
+    ngx_sleep(0)
   end
   self.last = last
+end
+
+function KeyIndex:sync_expired(N)
+  local first = self.not_expired_index
+  --- the key is sorted by created time, so the key will expire in order
+  for i = first, N do
+    self.not_expired_index = i
+    -- Read i-th key. If it is nil, it means it was expired
+    local ttl, err = self.dict:ttl(self.key_prefix .. i)
+    if ttl then
+      if ttl == 0 then
+        goto CONTINUE
+      else
+        break
+      end
+    else
+      if err ~= "not found" then
+        break
+      end
+      if self.keys[i] then
+        -- we don't need to update self.delete_count and self.key_count
+        self.index[self.keys[i]] = nil
+        self.keys[i] = nil
+      end
+    end
+    ::CONTINUE::
+    ngx_sleep(0)
+  end
 end
 
 -- Returns array of all keys.
@@ -71,7 +103,7 @@ end
 --
 -- Returns:
 --   nil on success, string with error message otherwise
-function KeyIndex:add(key_or_keys, err_msg_lru_eviction)
+function KeyIndex:add(key_or_keys, err_msg_lru_eviction, exptime)
   local keys = key_or_keys
   if type(key_or_keys) == "string" then
     keys = { key_or_keys }
@@ -85,7 +117,7 @@ function KeyIndex:add(key_or_keys, err_msg_lru_eviction)
         break
       end
       N = N+1
-      local ok, err, forcible = self.dict:add(self.key_prefix .. N, key)
+      local ok, err, forcible = self.dict:add(self.key_prefix .. N, key, exptime)
       if ok then
         local _, _, forcible2 = self.dict:incr(self.key_count, 1, 0)
         self.keys[N] = key

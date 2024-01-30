@@ -33,7 +33,8 @@ local id
 local function sync(_, self)
   local err, _, forcible
   local ok = true
-  for k, v in pairs(self.increments) do
+  for k, value in pairs(self.increments) do
+    local v = value.v
     _, err, forcible = self.dict:incr(k, v, 0)
     if forcible then
       ngx.log(ngx.ERR, "increasing counter in shdict: lru eviction: key=", k)
@@ -42,6 +43,9 @@ local function sync(_, self)
     if err then
       ngx.log(ngx.ERR, "error increasing counter in shdict key: ", k, ", err: ", err)
       ok = false
+    end
+    if value.t then
+      self.dict:expire(k, value.t)
     end
   end
 
@@ -89,22 +93,26 @@ function _M:sync()
   return sync(false, self)
 end
 
-function _M:incr(key, step)
+function _M:incr(key, step, exptime)
   step = step or 1
-  local v = self.increments[key]
-  if v then
-    step = step + v
+  local value = self.increments[key]
+  if value then
+    step = step + value.v
   end
 
-  self.increments[key] = step
+  self.increments[key] = {v = step, t = exptime}
   return true
 end
 
-function _M:reset(key, number)
+function _M:reset(key, number, exptime)
   if not number then
     return nil, "expect a number at #2"
   end
-  return self.dict:incr(key, -number, number)
+  local newval, err, forcible = self.dict:incr(key, -number, number)
+  if exptime then
+    self.dict:expire(key, exptime)
+  end
+  return newval, err, forcible
 end
 
 function _M:get(key)

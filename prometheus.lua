@@ -447,7 +447,7 @@ local function lookup_or_create(self, label_values)
 
   self.lookup_size = self.lookup_size + 1
 
-  local err = self._key_index:add(full_name, ERR_MSG_LRU_EVICTION)
+  local err = self._key_index:add(full_name, ERR_MSG_LRU_EVICTION, self.exptime)
   if err then
     return nil, err
   end
@@ -474,6 +474,9 @@ local function inc_gauge(self, value, label_values)
   _, err, forcible = self._dict:incr(k, value, 0)
   if err or forcible then
     self._log_error_kv(k, value, err or ERR_MSG_LRU_EVICTION)
+  end
+  if self.exptime then
+    self._dict:expire(k, self.exptime)
   end
 end
 
@@ -509,7 +512,7 @@ local function inc_counter(self, value, label_values)
     end
     self._counter = c
   end
-  c:incr(k, value)
+  c:incr(k, value, self.exptime)
 end
 
 -- Delete a counter or a gauge metric.
@@ -567,7 +570,7 @@ local function set(self, value, label_values)
     self._log_error(err)
     return
   end
-  _, err, forcible = self._dict:set(k, value)
+  _, err, forcible = self._dict:set(k, value, self.exptime)
   if err or forcible then
     self._log_error_kv(k, value, err or ERR_MSG_LRU_EVICTION)
   end
@@ -602,20 +605,20 @@ local function observe(self, value, label_values)
   end
 
   -- _count metric.
-  c:incr(keys[1], 1)
+  c:incr(keys[1], 1, self.exptime)
 
   -- _sum metric.
-  c:incr(keys[2], value)
+  c:incr(keys[2], value, self.exptime)
 
   -- the last bucket (le="Inf").
-  c:incr(keys[self.bucket_count+3], 1)
+  c:incr(keys[self.bucket_count+3], 1, self.exptime)
 
   local seen = false
   -- check in reverse order, otherwise we will always
   -- need to traverse the whole table.
   for i=self.bucket_count, 1, -1 do
     if value <= self.buckets[i] then
-      c:incr(keys[2+i], 1)
+      c:incr(keys[2+i], 1, self.exptime)
       seen = true
     elseif seen then
       break
@@ -798,7 +801,7 @@ end
 --
 -- Returns:
 --   a new metric object.
-local function register(self, name, help, label_names, buckets, typ)
+local function register(self, name, help, label_names, buckets, typ, exptime)
   if not self.initialized then
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")
     return
@@ -851,6 +854,7 @@ local function register(self, name, help, label_names, buckets, typ)
     _key_index = self.key_index,
     _dict = self.dict,
     reset = reset,
+    exptime = exptime,
   }
   if typ < TYPE_HISTOGRAM then
     if typ == TYPE_GAUGE then
@@ -893,18 +897,18 @@ do
 end
 
 -- Public function to register a counter.
-function Prometheus:counter(name, help, label_names)
-  return register(self, name, help, label_names, nil, TYPE_COUNTER)
+function Prometheus:counter(name, help, label_names, exptime)
+  return register(self, name, help, label_names, nil, TYPE_COUNTER, exptime)
 end
 
 -- Public function to register a gauge.
-function Prometheus:gauge(name, help, label_names)
-  return register(self, name, help, label_names, nil, TYPE_GAUGE)
+function Prometheus:gauge(name, help, label_names, exptime)
+  return register(self, name, help, label_names, nil, TYPE_GAUGE, exptime)
 end
 
 -- Public function to register a histogram.
-function Prometheus:histogram(name, help, label_names, buckets)
-  return register(self, name, help, label_names, buckets, TYPE_HISTOGRAM)
+function Prometheus:histogram(name, help, label_names, buckets, exptime)
+  return register(self, name, help, label_names, buckets, TYPE_HISTOGRAM, exptime)
 end
 
 -- Prometheus compatible metric data as an array of strings.

@@ -5,21 +5,26 @@ rex_pcre2 = require('rex_pcre2')
 -- Simple implementation of a nginx shared dictionary
 local SimpleDict = {}
 SimpleDict.__index = SimpleDict
-function SimpleDict:set(k, v)
+function SimpleDict:set(k, v, exptime)
   local forcible = false
   if k == "willnotfitk" or v == "willnotfitv" then
     forcible = true
   end
   if not self.dict then self.dict = {} end
-  self.dict[k] = v
+  if not v then
+    self.dict[k] = nil
+  else
+    local expired = exptime and (os.time() + exptime)
+    self.dict[k] = {value = v, expired = expired}
+  end
   return true, nil, forcible
 end
-function SimpleDict:add(k, v)
+function SimpleDict:add(k, v, exptime)
   local forcible = false
   if k == "willnotfitk" or v == "willnotfitv" then
     forcible = true
   end
-  self:set(k, v)
+  self:set(k, v, exptime)
   return true, nil, forcible  -- ok, err, forcible
 end
 function SimpleDict:incr(k, v, init)
@@ -27,9 +32,9 @@ function SimpleDict:incr(k, v, init)
   if k == "willnotfitk" or v == "willnotfitv" then
     forcible = true
   end
-  if not self.dict[k] then self.dict[k] = init end
-  self.dict[k] = self.dict[k] + (v or 1)
-  return self.dict[k], nil, forcible  -- newval, err, forcible
+  if not self.dict[k] then self.dict[k] = {value = init} end
+  self.dict[k]["value"] = self.dict[k]["value"] + (v or 1)
+  return self.dict[k]["value"], nil, forcible  -- newval, err, forcible
 end
 function SimpleDict:get(k)
   -- simulate key not exist
@@ -41,10 +46,34 @@ function SimpleDict:get(k)
     return nil, "dict error"
   end
   if not self.dict then self.dict = {} end
-  return self.dict[k], nil  -- value, err
+  if self.dict[k] and self.dict[k]["expired"] and self.dict[k]["expired"] < os.time() then self.dict[k] = nil end
+  local v = self.dict[k] or {}
+  return v["value"], nil  -- value, err
 end
 function SimpleDict:delete(k)
   self.dict[k] = nil
+end
+function SimpleDict:expire(k, exptime)
+  if not self.dict[k] then
+    return nil, "not found"
+  end
+  self.dict[k]["expired"] = os.time() + exptime
+end
+function SimpleDict:ttl(k)
+  self:get(k)
+  if not self.dict[k] then
+    return nil, "not found"
+  end
+  if self.dict[k]["expired"] then
+    return self.dict[k]["expired"] - os.time()
+  else
+    return 0
+  end
+end
+
+local function sleep(n)
+  local t0 = os.time()
+  while os.time() - t0 <= n do end
 end
 
 -- Global nginx object
@@ -112,6 +141,10 @@ function TestPrometheus:setUp()
   self.gauge2 = self.p:gauge("gauge2", "Gauge 2", {"f2", "f1"})
   self.hist1 = self.p:histogram("l1", "Histogram 1")
   self.hist2 = self.p:histogram("l2", "Histogram 2", {"var", "site"})
+  self.counter_exp = self.p:counter("metric_exp", "Metric expire", nil, 1)
+  self.gauge_exp = self.p:gauge("gauge_exp", "Gauge expire", nil, 1)
+  self.gauge_exp_2 = self.p:gauge("gauge_exp_2", "Gauge expire 2", nil, 1)
+  self.hist_exp = self.p:histogram("l_exp", "Histogram expire", nil, nil, 1)
 end
 function TestPrometheus.tearDown()
   ngx.logs = nil
@@ -849,7 +882,69 @@ function TestPrometheus.testPrintfTable()
   luaunit.assertEquals(p._table_to_string({"foo"}), "<foo>")
   luaunit.assertEquals(p._table_to_string({"foo",2,"bar"}), "<foo,2,bar>")
   -- table ends at the first value before nil.
-  luaunit.assertEquals(p._table_to_string({nil,2,nil,"foo",nil}), "<nil,2>")
+  luaunit.assertEquals(p._table_to_string({nil,2,nil,"foo",nil}), "<nil,2,nil,foo>")
+end
+
+function TestPrometheus:testKeyTimeout()
+  self.counter_exp:inc(1)
+  self.p._counter:sync()
+  luaunit.assertEquals(self.dict:get("metric_exp"), 1)
+  local i = self.p.key_index.index["metric_exp"]
+  luaunit.assertEquals(self.dict:get("__ngx_prom__key_" .. i), "metric_exp")
+  luaunit.assertEquals(self.p.key_index.keys[i], "metric_exp")
+
+  sleep(1)
+  self.p.key_index:sync()
+  luaunit.assertEquals(self.dict:get("metric_exp"), nil)
+  luaunit.assertEquals(self.dict:get("__ngx_prom__key_" .. i), nil)
+  luaunit.assertEquals(self.p.key_index.index["metric_exp"], nil)
+  luaunit.assertEquals(self.p.key_index.keys[i], nil)
+
+  self.gauge_exp:inc(1)
+  luaunit.assertEquals(self.dict:get("gauge_exp"), 1)
+  local i = self.p.key_index.index["gauge_exp"]
+  luaunit.assertEquals(self.dict:get("__ngx_prom__key_" .. i), "gauge_exp")
+  luaunit.assertEquals(self.p.key_index.keys[i], "gauge_exp")
+
+  sleep(1)
+  self.p.key_index:sync()
+  luaunit.assertEquals(self.dict:get("gauge_exp"), nil)
+  luaunit.assertEquals(self.dict:get("__ngx_prom__key_" .. i), nil)
+  luaunit.assertEquals(self.p.key_index.index["gauge_exp"], nil)
+  luaunit.assertEquals(self.p.key_index.keys[i], nil)
+
+  self.gauge_exp_2:set(1)
+  self.p.key_index:sync()
+  luaunit.assertEquals(self.dict:get("gauge_exp_2"), 1)
+  local i = self.p.key_index.index["gauge_exp_2"]
+  luaunit.assertEquals(self.dict:get("__ngx_prom__key_" .. i), "gauge_exp_2")
+  luaunit.assertEquals(self.p.key_index.keys[i], "gauge_exp_2")
+
+  sleep(1)
+  self.p.key_index:sync()
+  luaunit.assertEquals(self.dict:get("gauge_exp_2"), nil)
+  luaunit.assertEquals(self.dict:get("__ngx_prom__key_" .. i), nil)
+  luaunit.assertEquals(self.p.key_index.index["gauge_exp_2"], nil)
+  luaunit.assertEquals(self.p.key_index.keys[i], nil)
+
+  self.hist_exp:observe(0.35)
+  self.hist_exp:observe(0.4)
+  self.p._counter:sync()
+  luaunit.assertEquals(self.dict:get('l_exp_bucket{le="00.300"}'), nil)
+  luaunit.assertEquals(self.dict:get('l_exp_bucket{le="00.400"}'), 2)
+  luaunit.assertEquals(self.dict:get('l_exp_bucket{le="00.500"}'), 2)
+  luaunit.assertEquals(self.dict:get('l_exp_bucket{le="Inf"}'), 2)
+  luaunit.assertEquals(self.dict:get('l_exp_count'), 2)
+  luaunit.assertEquals(self.dict:get('l_exp_sum'), 0.75)
+
+  sleep(1)
+  luaunit.assertEquals(self.dict:get('l_exp_bucket{le="00.300"}'), nil)
+  luaunit.assertEquals(self.dict:get('l_exp_bucket{le="00.400"}'), nil)
+  luaunit.assertEquals(self.dict:get('l_exp_bucket{le="00.500"}'), nil)
+  luaunit.assertEquals(self.dict:get('l_exp_bucket{le="Inf"}'), nil)
+  luaunit.assertEquals(self.dict:get('l_exp_count'), nil)
+  luaunit.assertEquals(self.dict:get('l_exp_sum'), nil)
+
 end
 
 os.exit(luaunit.run())

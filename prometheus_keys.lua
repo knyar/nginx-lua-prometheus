@@ -4,8 +4,6 @@
 -- using ngx.shared.dict:get_keys (see https://github.com/openresty/lua-nginx-module#ngxshareddictget_keys),
 -- which blocks all workers and therefore it shouldn't be used with large
 -- amounts of keys.
-local ngx_sleep = ngx.sleep
-
 local KeyIndex = {}
 KeyIndex.__index = KeyIndex
 
@@ -51,7 +49,6 @@ function KeyIndex:sync_range(first, last)
       self.index[self.keys[i]] = nil
       self.keys[i] = nil
     end
-    ngx_sleep(0)
   end
   self.last = last
 end
@@ -80,7 +77,6 @@ function KeyIndex:sync_expired(N)
       end
     end
     ::CONTINUE::
-    ngx_sleep(0)
   end
 end
 

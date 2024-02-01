@@ -3,9 +3,9 @@ name: Release
 on:
   push:
     branches:
-      - "master"
+      - "main"
     paths:
-      - 'rockspecs/**'
+      - 'rockspec/**'
 
 jobs:
   release:
@@ -28,7 +28,7 @@ jobs:
           title="${{ github.event.head_commit.message }}"
           re="^feat: release v*(\S+)"
           if [[ $title =~ $re ]]; then
-              v=v${BASH_REMATCH[1]}
+              v=${BASH_REMATCH[1]}
               echo "##[set-output name=version;]${v}"
               echo "##[set-output name=version_withou_v;]${BASH_REMATCH[1]}"
           else
@@ -51,4 +51,4 @@ jobs:
           LUAROCKS_TOKEN: ${{ secrets.LUAROCKS_TOKEN }}
         run: |
           luarocks install dkjson
-          luarocks upload nginx-lua-prometheus-${{ steps.release_env.outputs.version_withou_v }}-0.rockspec --api-key=${LUAROCKS_TOKEN}
+          luarocks upload rockspec/nginx-lua-prometheus-api7-${{ steps.release_env.outputs.version_withou_v }}-1.rockspec --api-key=${LUAROCKS_TOKEN}

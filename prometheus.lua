@@ -412,6 +412,10 @@ local function lookup_or_create(self, label_values)
   local LEAF_KEY = mt -- key used to store full metric names in leaf tables.
   local full_name = t[LEAF_KEY]
   if full_name then
+    local err = self._key_index:add(full_name, ERR_MSG_LRU_EVICTION)
+    if err then
+      return nil, err
+    end
     return full_name
   end
 

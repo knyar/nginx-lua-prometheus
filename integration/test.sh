@@ -23,12 +23,12 @@ function cleanup {
 cleanup
 trap cleanup EXIT
 
-docker run -d --name ${container_name} -p 18001:18001 -p 18002:18002 \
+docker run -d --name ${container_name} -p 18000-18001:18000-18001 \
   -v "${base_dir}/../:/nginx-lua-prometheus" ${image_name} \
   nginx -c /nginx-lua-prometheus/integration/nginx.conf
 
 RC=0
-go run test.go || RC=$?
+go run . || RC=$?
 
 nginx_logs 2>&1 | tail -30
 

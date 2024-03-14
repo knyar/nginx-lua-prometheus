@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"net/http"
 	"sync"
 	"time"
 
@@ -40,10 +41,14 @@ var urls = map[requestType]string{
 	reqError: "http://localhost:18001/error",
 }
 
-// Verify bucket boundaries. This should match the buckets defined in nginx.conf.
+// Expected bucket boundaries. This should match the buckets defined in nginx.conf.
 var buckets = []float64{0.08, 0.089991, 0.1, 0.2, 0.75, 1, 1.5, 3.123232001, 5, 15, 120, 350.5, 1500, 75000, 1500000, math.Inf(1)}
 
-func registerBasic(tr *testRunner) {
+// Register a basic test that will send requests to 'fast', 'slow' and 'error'
+// endpoints and verify that request counters and latency measurements are
+// accurate.
+func registerBasicTest(tr *testRunner) {
+	tr.healthURLs = append(tr.healthURLs, "http://localhost:18001/health")
 	results := make(chan map[requestType]int64, *concurrency)
 	tr.tests = append(tr.tests, func() error {
 		log.Printf("Running basic test with %d concurrent clients for %v", *concurrency, *testDuration)
@@ -62,17 +67,16 @@ func registerBasic(tr *testRunner) {
 						// 5% are errors
 						t = reqError
 					}
-					resp, err := tr.client.Get(urls[t])
-					if err != nil {
-						log.Fatalf("Could not fetch URL %s: %v", urls[t], err)
-					}
-					body, err := io.ReadAll(resp.Body)
-					if err != nil {
-						log.Fatalf("Could not read HTTP response for %s: %v", urls[t], err)
-					}
-					resp.Body.Close()
-					if t != reqError && string(body) != "ok\n" {
-						log.Fatalf("Unexpected response %q from %s; expected 'ok'", string(body), urls[t])
+					if t == reqError {
+						tr.mustGetContext(tr.ctx, urls[t], func(r *http.Response) error {
+							io.Copy(io.Discard, r.Body)
+							if r.StatusCode != 500 {
+								return fmt.Errorf("expected response 500, got %+v", r)
+							}
+							return nil
+						})
+					} else {
+						tr.mustGet(urls[t])
 					}
 					result[t]++
 				}
@@ -192,8 +196,10 @@ func getHistogramSum(mfs map[string]*dto.MetricFamily, metric string, labels [][
 func hasMetricFamily(mfs map[string]*dto.MetricFamily, want *dto.MetricFamily) error {
 	sortFn := func(x, y interface{}) bool { return pretty.Sprint(x) < pretty.Sprint(y) }
 	for _, mf := range mfs {
-		if *mf.Name == *want.Name {
+		if mf.GetName() == want.GetName() {
 			if diff := cmp.Diff(want, mf, cmpopts.SortSlices(sortFn)); diff != "" {
+				log.Printf("Want: %+v", want)
+				log.Printf("Got:  %+v", mf)
 				return fmt.Errorf("unexpected metric family %v (-want +got):\n%s", mf.Name, diff)
 			}
 			return nil

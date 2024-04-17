@@ -104,13 +104,18 @@ function TestPrometheus:setUp()
   self.dict = setmetatable({}, SimpleDict)
   ngx.shared.metrics = self.dict
   self.p = require('prometheus').init('metrics')
+  -- Another instance of the library to simulate a second nginx worker.
+  self.p2 = require('prometheus').init('metrics')
   self.counter1 = self.p:counter("metric1", "Metric 1")
   self.counter2 = self.p:counter("metric2", "Metric 2", {"f2", "f1"})
   self.counter3 = self.p:counter("metric3", "Metric 3", {"f3"})
   self.counter4 = self.p:counter("metric4", "Metric 4", {"f1","f2","f3"})
   self.gauge1 = self.p:gauge("gauge1", "Gauge 1")
+  self.gauge1_p2 = self.p2:gauge("gauge1", "Gauge 1")
   self.gauge2 = self.p:gauge("gauge2", "Gauge 2", {"f2", "f1"})
+  self.gauge2_p2 = self.p2:gauge("gauge2", "Gauge 2", {"f2", "f1"})
   self.hist1 = self.p:histogram("l1", "Histogram 1")
+  self.hist1_p2 = self.p2:histogram("l1", "Histogram 1")
   self.hist2 = self.p:histogram("l2", "Histogram 2", {"var", "site"})
 end
 function TestPrometheus.tearDown()
@@ -411,6 +416,7 @@ function TestPrometheus:testReset()
   self.gauge1:reset()
   self.p.key_index:sync()
   luaunit.assertEquals(self.dict:get("gauge1"), nil)
+  luaunit.assertEquals(self.gauge1.lookup, {})
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
   self.gauge1:inc(3)
@@ -521,6 +527,43 @@ function TestPrometheus:testReset()
   luaunit.assertEquals(self.dict:get('l2_count{var="ok",site="site1"}'), nil)
   luaunit.assertEquals(self.dict:get('l2_sum{var="ok",site="site1"}'), nil)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  -- Set a gauge value that will be reset by another worker.
+  self.gauge1:set(42)
+  self.gauge2:set(91, {"a", "b1"})
+  self.gauge2:set(92, {"a", "b2"})
+  luaunit.assertEquals(self.dict:get("gauge1"), 42)
+  luaunit.assertEquals(self.dict:get('gauge2{f2="a",f1="b1"}'), 91)
+  luaunit.assertEquals(self.dict:get('gauge2{f2="a",f1="b2"}'), 92)
+  luaunit.assertNotEquals(self.gauge1.lookup, {})
+  luaunit.assertNotEquals(self.gauge2.lookup, {})
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  -- After another worker has reset the metric, confirm that the per-metric
+  -- lookup table has been reset.
+  self.gauge1_p2:reset()
+  self.gauge2_p2:del({"a", "b1"})
+  self.p.key_index:sync()
+  luaunit.assertEquals(self.dict:get("gauge1"), nil)
+  luaunit.assertEquals(self.dict:get('gauge2{f2="a",f1="b1"}'), nil)
+  luaunit.assertEquals(self.dict:get('gauge2{f2="a",f1="b2"}'), 92)
+  luaunit.assertEquals(self.gauge1.lookup, {})
+  luaunit.assertEquals(self.gauge2.lookup, {})
+  luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
+
+  -- Similarly, check that a histogram metric reset by another worker
+  -- results in metric lookup table being reset.
+  self.hist1:reset()
+  self.hist1:observe(0.44)
+  self.p._counter:sync()
+  luaunit.assertEquals(self.dict:get('l1_sum'), 0.44)
+  luaunit.assertNotEquals(self.hist1.lookup, {})
+
+  self.hist1_p2:reset()
+  self.p.key_index:sync()
+  luaunit.assertEquals(self.dict:get('l1_sum'), nil)
+  luaunit.assertEquals(self.hist1.lookup, {})
+  luaunit.assertEquals(self.hist1_p2.lookup, {})
 
   -- key not exist
   self.gauge2:inc(4, {"key_not_exist", "key_not_exist"})
@@ -705,7 +748,9 @@ TestKeyIndex = {}
 function TestKeyIndex:setUp()
   self.dict = setmetatable({}, SimpleDict)
   ngx.shared.metrics = self.dict
-  self.key_index = require('prometheus_keys').new(self.dict, '_prefix_')
+  self.key_index = require('prometheus_keys').new(self.dict, '_prefix_', function(key)
+    self.last_deleted_key = key
+  end)
 end
 function TestKeyIndex.tearDown()
   ngx.logs = nil
@@ -795,13 +840,13 @@ function TestKeyIndex:testSync()
   -- key deleted by another worker
   self.dict:set("_prefix_delete_count", 1)
   self.dict:delete("_prefix_key_2")
-  self.dict:set("_prefix_key_3", "key3")
   self.key_index:sync()
   keys = self.key_index:list()
   luaunit.assertEquals(ngx.logs, nil)
   luaunit.assertEquals(#keys, 2)
   luaunit.assertEquals(keys[1], "key1")
   luaunit.assertEquals(keys[2], "key3")
+  luaunit.assertEquals(self.last_deleted_key, "key2")
 end
 
 function TestPrometheus:testLookupMaxSize()

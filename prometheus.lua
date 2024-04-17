@@ -111,7 +111,7 @@ local ERR_MSG_COUNTER_NOT_INITIALIZED = "counter not initialized! " ..
 -- Error message that gets logged when the shared dictionary gets full.
 local ERR_MSG_LRU_EVICTION = "Shared dictionary used for prometheus metrics " ..
   "is full. REPORTED METRIC DATA MIGHT BE INCOMPLETE. Please increase the " ..
-  "size of the dictionary or decrease metric cardinality."
+  "size of the dictionary or reduce metric cardinality."
 
 -- Accepted range of byte values for tailing bytes of utf8 strings.
 -- This is defined outside of the validate_utf8_string function as a const
@@ -384,8 +384,7 @@ local function lookup_or_create(self, label_values)
   end
 
   if self.lookup_size >= self.lookup_max_size then
-    self.lookup_size = 0
-    self.lookup = {}
+    self:reset_lookup()
   end
 
   local t = self.lookup
@@ -547,6 +546,9 @@ local function del(self, label_values)
   if err then
     self._log_error("Error deleting key: ".. k .. ": " .. err)
   end
+
+  -- Clean up the full metric name lookup table as well.
+  self.lookup = {}
 end
 
 -- Set the value of a gauge metric.
@@ -623,6 +625,12 @@ local function observe(self, value, label_values)
   end
 end
 
+-- Reset the metric name lookup table for a given metric.
+local function reset_lookup(self)
+  self.lookup_size = 0
+  self.lookup = {}
+end
+
 -- Delete all metrics for a given gauge, counter or a histogram.
 --
 -- This is like `del`, but will delete all time series for all previously
@@ -691,7 +699,7 @@ local function reset(self)
   end
 
   -- Clean up the full metric name lookup table as well.
-  self.lookup = {}
+  self:reset_lookup()
 end
 
 -- Initialize the module.
@@ -738,7 +746,22 @@ function Prometheus.init(dict_name, options_or_prefix)
   end
 
   self.registry = {}
-  self.key_index = key_index_lib.new(self.dict, KEY_INDEX_PREFIX)
+  self.key_index = key_index_lib.new(self.dict, KEY_INDEX_PREFIX, function(metric_key)
+    -- When another worker calls reset or del on a metric, reset that
+    -- metric's local lookup table.
+    local metric_name = ngx_re_gsub(metric_key, "{.*", "", "jo")
+    if self.registry[metric_name] then
+      local m = self.registry[metric_name]
+      m.lookup = {}
+      return
+    end
+
+    metric_name = ngx_re_gsub(metric_name, "_sum$", "", "jo")
+    local m = self.registry[metric_name]
+    if m and m.typ == TYPE_HISTOGRAM then
+      m:reset_lookup()
+    end
+  end)
 
   self.initialized = true
 
@@ -757,7 +780,7 @@ end
 
 -- Initialize the worker counter.
 --
--- This can call this function from the `init_worker_by_lua` if you are calling
+-- You can call this function from the `init_worker_by_lua` if you are calling
 -- Prometheus.init() from `init_by_lua`, but this is deprecated. Instead, just
 -- call Prometheus.init() from `init_worker_by_lua_block` and pass sync_interval
 -- as part of the `options` argument if you need.
@@ -782,6 +805,10 @@ function Prometheus:init_worker(sync_interval)
     error(err, 2)
   end
   self._counter = counter_instance
+
+  ngx.timer.every(self.sync_interval, function (_)
+    self.key_index:sync()
+  end)
 end
 
 -- Register a new metric.
@@ -844,6 +871,7 @@ local function register(self, name, help, label_names, buckets, typ)
     lookup = {},
     lookup_size = 0,
     lookup_max_size = self.lookup_max_size,
+    reset_lookup = reset_lookup,
     parent = self,
     -- Store a reference for logging functions for faster lookup.
     _log_error = function(...) self:log_error(...) end,

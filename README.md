@@ -106,12 +106,6 @@ section of nginx configuration.
   * `sync_interval` (number): sets the sync interval for per-worker counters and
     key index (in seconds). This sets the boundary on eventual consistency of
     counter metric increments, and metric resets/deletions. Defaults to 1.
-  * `lookup_max_size` (number): maximum size of a per-metric lookup table
-    maintained by each worker to cache full metric names. Defaults to 1000.
-    If you have metrics with extremely high cardinality and lots of available
-    RAM, you might want to increase this to avoid cache getting flushed too
-    often. Decreasing this makes sense if you have a very large number of
-    metrics or need to minimize memory usage of this library.
 
 Returns a `prometheus` object that should be used to register metrics.
 

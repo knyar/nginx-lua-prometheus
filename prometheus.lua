@@ -92,9 +92,6 @@ local DEFAULT_ERROR_METRIC_NAME = "nginx_metric_errors_total"
 -- Default value for per-worker counter sync interval (seconds).
 local DEFAULT_SYNC_INTERVAL = 1
 
--- Default max size of lookup table
-local DEFAULT_LOOKUP_MAX_SIZE = 1000
-
 -- Default set of latency buckets, 5ms to 10s:
 local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
                          0.4, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5, 10}
@@ -383,10 +380,6 @@ local function lookup_or_create(self, label_values)
       self.name, self.label_count, cnt, table_to_string(label_values))
   end
 
-  if self.lookup_size >= self.lookup_max_size then
-    self:reset_lookup()
-  end
-
   local t = self.lookup
   if label_values then
     -- Don't use ipairs here to avoid inner loop generates trace first
@@ -443,8 +436,6 @@ local function lookup_or_create(self, label_values)
     full_name = full_metric_name(self.name, self.label_names, label_values)
   end
   t[LEAF_KEY] = full_name
-
-  self.lookup_size = self.lookup_size + 1
 
   local err = self._key_index:add(full_name, ERR_MSG_LRU_EVICTION)
   if err then
@@ -625,12 +616,6 @@ local function observe(self, value, label_values)
   end
 end
 
--- Reset the metric name lookup table for a given metric.
-local function reset_lookup(self)
-  self.lookup_size = 0
-  self.lookup = {}
-end
-
 -- Delete all metrics for a given gauge, counter or a histogram.
 --
 -- This is like `del`, but will delete all time series for all previously
@@ -699,7 +684,7 @@ local function reset(self)
   end
 
   -- Clean up the full metric name lookup table as well.
-  self:reset_lookup()
+  self.lookup = {}
 end
 
 -- Initialize the module.
@@ -736,13 +721,10 @@ function Prometheus.init(dict_name, options_or_prefix)
       DEFAULT_ERROR_METRIC_NAME
     self.sync_interval = options_or_prefix.sync_interval or
       DEFAULT_SYNC_INTERVAL
-    self.lookup_max_size = options_or_prefix.lookup_max_size or
-      DEFAULT_LOOKUP_MAX_SIZE
   else
     self.prefix = options_or_prefix or ''
     self.error_metric_name = DEFAULT_ERROR_METRIC_NAME
     self.sync_interval = DEFAULT_SYNC_INTERVAL
-    self.lookup_max_size = DEFAULT_LOOKUP_MAX_SIZE
   end
 
   self.registry = {}
@@ -759,7 +741,7 @@ function Prometheus.init(dict_name, options_or_prefix)
     metric_name = ngx_re_gsub(metric_name, "_sum$", "", "jo")
     local m = self.registry[metric_name]
     if m and m.typ == TYPE_HISTOGRAM then
-      m:reset_lookup()
+      m.lookup = {}
     end
   end)
 
@@ -869,9 +851,6 @@ local function register(self, name, help, label_names, buckets, typ)
     -- ['my.net']['200'][LEAF_KEY] = 'http_count{host="my.net",status="200"}'
     -- ['my.net']['500'][LEAF_KEY] = 'http_count{host="my.net",status="500"}'
     lookup = {},
-    lookup_size = 0,
-    lookup_max_size = self.lookup_max_size,
-    reset_lookup = reset_lookup,
     parent = self,
     -- Store a reference for logging functions for faster lookup.
     _log_error = function(...) self:log_error(...) end,

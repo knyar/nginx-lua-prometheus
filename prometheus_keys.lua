@@ -8,7 +8,7 @@
 local KeyIndex = {}
 KeyIndex.__index = KeyIndex
 
-function KeyIndex.new(shared_dict, prefix)
+function KeyIndex.new(shared_dict, prefix, delete_callback)
   local self = setmetatable({}, KeyIndex)
   self.dict = shared_dict
   self.key_prefix = prefix .. "key_"
@@ -18,6 +18,7 @@ function KeyIndex.new(shared_dict, prefix)
   self.deleted = 0
   self.keys = {}
   self.index = {}
+  self.delete_callback = delete_callback
   return self
 end
 
@@ -45,6 +46,7 @@ function KeyIndex:sync_range(first, last)
       self.keys[i] = key
       self.index[key] = i
     elseif self.keys[i] then
+      self.delete_callback(self.keys[i])
       self.index[self.keys[i]] = nil
       self.keys[i] = nil
     end
@@ -114,7 +116,7 @@ function KeyIndex:remove(key, err_msg_lru_eviction)
     self.dict:set(self.key_prefix .. i, nil)
     self.deleted = self.deleted + 1
 
-    -- increment delete_count to signalize other workers that they should do a full sync
+    -- increment delete_count to signal other workers that they should do a full sync
     local _, err, forcible = self.dict:incr(self.delete_count, 1, 0)
     if err or forcible then
       return err or err_msg_lru_eviction

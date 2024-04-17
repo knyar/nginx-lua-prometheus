@@ -103,9 +103,9 @@ section of nginx configuration.
     metric names on output.
   * `error_metric_name` (string): Can be used to change the default name of
     error metric (see [Built-in metrics](#built-in-metrics) for details).
-  * `sync_interval` (number): sets per-worker counter sync interval in seconds.
-    This sets the boundary on eventual consistency of counter metrics. Defaults
-    to 1.
+  * `sync_interval` (number): sets the sync interval for per-worker counters and
+    key index (in seconds). This sets the boundary on eventual consistency of
+    counter metric increments, and metric resets/deletions. Defaults to 1.
   * `lookup_max_size` (number): maximum size of a per-metric lookup table
     maintained by each worker to cache full metric names. Defaults to 1000.
     If you have metrics with extremely high cardinality and lots of available

@@ -348,9 +348,9 @@ Records a value in a previously registered histogram. Usually called from
 [log_by_lua_block](https://github.com/openresty/lua-nginx-module#log_by_lua_block)
 globally or per server/location.
 
-Note that recording an observation requires incrementing several histogram,
-which does not happen atomically and might race with metric collection (see
-#161).
+Note that recording an observation requires incrementing several histogram
+counters, which does not happen atomically and might race with metric
+collection (see #161).
 
 * `value` is a value that should be recorded. Required.
 * `label_values` is an array of label values.

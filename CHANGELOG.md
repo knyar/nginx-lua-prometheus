@@ -4,6 +4,15 @@ This file only calls out major changes. Please see [the list of Git commits](
 https://github.com/knyar/nginx-lua-prometheus/commits/master) for the full list
 of changes.
 
+## 0.20240525
+
+- Fixed a bug that prevented usage of metrics that had previously been reset
+  (#171).
+- Removed the size limit for per-metric lookup tables, instead resetting the
+  lookup tables every time a metric is reset.
+- Reordered the way histogram counters are incremented to partially mitigate
+  consistency issues (#161).
+
 ## 0.20230607
 
 Improved checking of label values.

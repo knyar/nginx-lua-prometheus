@@ -549,7 +549,7 @@ end
 --   value: numeric value.
 --   label_values: a list of label values, in the same order as label keys.
 local function set(self, value, label_values)
-  if not value then
+  if tonumber(value) == nil then
     self._log_error("No value passed for " .. self.name)
     return
   end
@@ -573,7 +573,7 @@ end
 --   value: numeric value to record. Should be defined.
 --   label_values: a list of label values, in the same order as label keys.
 local function observe(self, value, label_values)
-  if not value then
+  if tonumber(value) == nil then
     self._log_error("No value passed for " .. self.name)
     return
   end

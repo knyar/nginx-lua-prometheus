@@ -427,6 +427,21 @@ issue:
 * Debian 11 (bug [#994178](https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=994178))
 * Ubuntu 20.04 and 21.04 (bug [#1893753](https://bugs.launchpad.net/ubuntu/+source/nginx/+bug/1893753))
 
+### ngx.sleep(0) called without delayed events patch
+
+You might see the following warning logged by nginx when metrics are being
+collected:
+
+> [warn] ngx.sleep(0) called without delayed events patch, this will hurt performance
+
+This is a side effect of a performance optimization added for OpenResty. While
+generating metric data, the library aims to occasionally yield control back to
+the nginx event loop to avoid blocking the worker process and causing increased
+latency for other in-flight requests.
+
+This warning is displayed when the library is used with nginx that lacks
+OpenResty patches and can be ignored.
+
 ## Troubleshooting
 
 ### Make sure that nginx lua module is enabled

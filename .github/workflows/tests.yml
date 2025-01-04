@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-python@v2
-      - run: sudo apt install libpcre2-dev
+      - run: sudo apt install libpcre2-dev libreadline-dev
       - run: pip install hererocks
       # Install latest LuaRocks version plus the Lua version for this build job
       # into 'here' subdirectory.

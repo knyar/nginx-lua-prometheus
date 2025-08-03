@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+  namespace: stg
+  labels:
+    app.kubernetes.io/name: myapp
+    app.kubernetes.io/component: app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: myapp
+      app.kubernetes.io/component: app
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 50%
+      maxUnavailable: 10%
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: myapp
+        app.kubernetes.io/component: app
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      containers:
+      - name: app
+        image: myregistry/myapp:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9000
+          name: app
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1024Mi
+          limits:
+            cpu: 1500m
+            memory: 2048Mi
+      - name: nginx
+        image: openresty/openresty:1.27.1.2-alpine  # of course the version can be changed
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: TZ
+          value: Asia/Tehran
+        ports:
+        - containerPort: 80
+          name: nginx
+        livenessProbe:
+          tcpSocket:
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 2
+        readinessProbe:
+          tcpSocket:
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 2
+        resources:
+          requests:
+            cpu: 20m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: myapp-default-conf
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: default.conf
+        - name: myapp-nginx-lua
+          mountPath: /opt/prometheus
+      volumes:
+      - name: myapp-default-conf
+        configMap:
+          name: myapp-default-conf
+      - name: myapp-nginx-lua
+        configMap:
+          name: myapp-nginx-lua

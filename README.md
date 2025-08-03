@@ -6,6 +6,41 @@ This is a Lua library that can be used with Nginx to keep track of metrics and
 expose them on a separate web page to be pulled by
 [Prometheus](https://prometheus.io).
 
+## What's New
+
+### ✅ Kubernetes Integration:
+Full sample manifests for deploying an OpenResty + Lua metrics-enabled app to a Kubernetes cluster. See ./kubernetes content.
+
+### ✅ Route Normalization
+To avoid high cardinality in metrics (e.g., /user/1, /user/2, /user/12345), request paths are sanitized into normalized routes. Dynamic segments (like numeric IDs or slugs with digits) are replaced with $param.
+Example:
+
+```bash
+/api/v1/user/1234/orders/987 => /api/v1/user/$param/orders/$param
+```
+
+This ensures metrics remain aggregation-friendly and manageable.
+
+### ✅ Labeled Metrics for Multi-Tenant Environments
+All metrics include two extra labels:
+
+* app: the name of the service (e.g., "myapp")
+
+* namespace: the Kubernetes namespace (e.g., "prod")
+
+These labels help distinguish metrics across multiple applications or environments in the same Prometheus/VictoriaMetrics instance.
+
+### ✅ Expired Metric Cleanup (Staleness Control)
+To prevent outdated metrics from accumulating in memory and being scraped indefinitely:
+
+* Each unique combination of {method, route, status, app, namespace} is stored with a timestamp.
+
+* A background timer runs every 5 seconds to clean up stale keys not updated in the last 15 seconds.
+
+* Expired entries are zeroed out in Prometheus (metric_latency:set(0, labels)), then deleted from shared memory.
+
+This makes your metric output time-bound and reliable, especially when used with time-series databases that are sensitive to high cardinality or stale label sets.
+
 ## Installation
 
 To use this library, you will need the [ngx_lua](
@@ -84,6 +119,27 @@ server {
 Metrics will be available at `http://your.nginx:9145/metrics`. Note that the
 gauge metric in this example contains values obtained from nginx global state,
 so they get set immediately before metrics are returned to the client.
+
+## Kubernetes Deployment
+This repository now includes a working Kubernetes deployment for testing or production use:
+
+* App and NGINX container sidecar
+
+* Prometheus Lua metrics via OpenResty
+
+* ConfigMaps for NGINX and Lua logic
+
+See:
+
+* ./deployment.yaml – a sample Deployment manifest
+
+* ./configmap-default-conf.yaml – includes the NGINX site config and Lua metric logic
+
+* ./configmap-nginx-lua.yaml – optional extra Lua scripts (if separated)
+
+* ./kubernetes/ – holds additional Kubernetes resources if needed
+
+you surely know how to deploy if you've come up to here.
 
 ## API reference
 

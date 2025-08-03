@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: myapp-default-conf
+  namespace: prod
+  labels:
+    app.kubernetes.io/name: myapp
+    app.kubernetes.io/team: backend
+data:
+  default.conf: |-
+    lua_shared_dict prometheus_metrics 10M;
+    lua_shared_dict custom_metrics 1M;
+    lua_package_path "/opt/prometheus/?.lua;;";
+    init_worker_by_lua_block {
+          prometheus = require("prometheus").init("prometheus_metrics")
+          metric_requests = prometheus:counter(
+                "nginx_http_requests_total",
+                "Number of HTTP requests",
+                {"method", "route", "status", "app", "namespace"}
+          )
+          metric_latency = prometheus:gauge(
+                "nginx_http_request_duration_seconds",
+                "Duration of last HTTP request in seconds",
+                {"method", "route", "status", "app", "namespace"}
+          )
+          metric_connections = prometheus:gauge(
+                "nginx_http_connections",
+                "Number of HTTP connections",
+                {"state", "app", "namespace"}
+          )
+          local latency_dict = ngx.shared.custom_metrics
+          local expiry_window = 15
+          local function reset_expired_latency(prodmature)
+                if prodmature then return end
+                local now = ngx.now()
+                local keys = latency_dict:get_keys(0)
+                for _, key in ipairs(keys) do
+                local last_update = latency_dict:get(key)
+                if last_update and now - last_update > expiry_window then
+                local labels = {}
+                for part in key:gmatch("[^|]+") do
+                      table.insert(labels, part)
+                end
+                metric_latency:set(0, labels)
+                latency_dict:delete(key)
+                end
+                end
+                local ok, err = ngx.timer.at(5, reset_expired_latency)
+                if not ok then
+                ngx.log(ngx.ERR, "Failed to schedule next reset: ", err)
+                end
+          end
+          local ok, err = ngx.timer.at(5, reset_expired_latency)
+          if not ok then
+                ngx.log(ngx.ERR, "Failed to start reset timer: ", err)
+          end
+    }
+    log_by_lua_block {
+          local method = ngx.var.request_method or "UNKNOWN"
+          local uri = ngx.var.request_uri or "/"
+          local status = ngx.var.status or "000"
+          local req_time = tonumber(ngx.var.request_time) or 0
+          local path = uri:match("^[^?]*")
+          local segments = {}
+          for seg in string.gmatch(path, "[^/]+") do
+                table.insert(segments, seg)
+          end
+          local sanitized_segments = {}
+          for _, segment in ipairs(segments) do
+                if segment:match("^%d+$") then
+                      table.insert(sanitized_segments, "$param")
+                elseif #segment > 4 and segment:find("%d") then
+                      table.insert(sanitized_segments, "$param")
+                else
+                      table.insert(sanitized_segments, segment)
+                end
+          end
+          local route = "/" .. table.concat(sanitized_segments, "/")
+          if route:sub(-1) == "/" and #route > 1 then
+                route = route:sub(1, -2)
+          end
+          local labels = {method, route, status, "myapp", "prod"}
+          local label_key = table.concat(labels, "|")
+          metric_requests:inc(1, labels)
+          metric_latency:set(req_time, labels)
+          local custom_dict = ngx.shared.custom_metrics
+          custom_dict:set(label_key, ngx.now())
+    }
+    server {
+          listen                          80 default;
+          server_name                     _;
+          location = /metrics {
+                content_by_lua_block {
+                      metric_connections:set(ngx.var.connections_reading, {"reading", "myapp", "prod"})
+                      metric_connections:set(ngx.var.connections_waiting, {"waiting", "myapp", "prod"})
+                      metric_connections:set(ngx.var.connections_writing, {"writing", "myapp", "prod"})
+                      prometheus:collect()
+                }
+                access_log off;
+          }
+    }

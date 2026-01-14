@@ -930,6 +930,9 @@ function Prometheus:metric_data()
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")
     return
   end
+  if self.key_index.incomplete_sync then
+    return
+  end
 
   -- Force a manual sync of counter local state (mostly to make tests work).
   self._counter:sync()

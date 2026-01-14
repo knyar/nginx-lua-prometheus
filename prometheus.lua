@@ -788,9 +788,15 @@ function Prometheus:init_worker(sync_interval)
   end
   self._counter = counter_instance
 
-  ngx.timer.every(self.sync_interval, function (_)
-    self.key_index:sync()
-  end)
+  local resync = function(_)
+      self.key_index:sync()
+      if self.key_index.incomplete_sync then
+        ngx.timer.at(0.01 + (0.01 * math.random()), resync)
+      else
+        ngx.timer.at(self.sync_interval, resync)
+      end
+  end
+  ngx.timer.at(self.sync_interval, resync)
 end
 
 -- Register a new metric.

@@ -8,6 +8,10 @@
 local KeyIndex = {}
 KeyIndex.__index = KeyIndex
 
+-- maximum numbers of keys to sync in one go (to not block worker process
+-- for too long)
+local MAX_SYNC_KEYS = 1000
+
 function KeyIndex.new(shared_dict, prefix, delete_callback)
   local self = setmetatable({}, KeyIndex)
   self.dict = shared_dict
@@ -19,6 +23,7 @@ function KeyIndex.new(shared_dict, prefix, delete_callback)
   self.keys = {}
   self.index = {}
   self.delete_callback = delete_callback
+  self.incomplete_sync = false
   return self
 end
 
@@ -39,6 +44,11 @@ end
 
 -- Iterates keys from first to last, adds new items and removes deleted items.
 function KeyIndex:sync_range(first, last)
+  self.incomplete_sync = false
+  if last - first > MAX_SYNC_KEYS then
+    last = first + MAX_SYNC_KEYS
+    self.incomplete_sync = true
+  end
   for i = first, last do
     -- Read i-th key. If it is nil, it means it was deleted by some other thread.
     local key = self.dict:get(self.key_prefix .. i)
@@ -85,6 +95,9 @@ function KeyIndex:add(key_or_keys, err_msg_lru_eviction)
       if self.index[key] ~= nil then
         -- key already exists, we can skip it
         break
+      end
+      if self.incomplete_sync then
+        return "Full sync is not yet completed"
       end
       N = N+1
       local ok, err, forcible = self.dict:add(self.key_prefix .. N, key)

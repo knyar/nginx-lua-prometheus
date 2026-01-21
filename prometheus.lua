@@ -56,6 +56,7 @@
 -- increments. Copied from https://github.com/Kong/lua-resty-counter
 local resty_counter_lib = require("prometheus_resty_counter")
 local key_index_lib = require("prometheus_keys")
+local lock = require "resty.lock"
 local ngx = ngx
 local ngx_re_match = ngx.re.match
 local ngx_re_gsub = ngx.re.gsub
@@ -456,7 +457,7 @@ end
 local function inc_gauge(self, value, label_values)
   local k, err, _, forcible
   k, err = lookup_or_create(self, label_values)
-  if err then
+  if err and self._key_index.first_synced then
     self._log_error(err)
     return
   end
@@ -695,12 +696,14 @@ end
 -- Args:
 --   dict_name: (string) name of the nginx shared dictionary which will be
 --     used to store all metrics
+--   lock_dict_name: name of the nginx shared dictionary which will be
+--     used to store keys for lua-resty-lock lock object
 --   prefix: (optional string) if supplied, prefix is added to all
 --     metric names on output
 --
 -- Returns:
 --   an object that should be used to register metrics.
-function Prometheus.init(dict_name, options_or_prefix)
+function Prometheus.init(dict_name, lock_dict_name, options_or_prefix)
   if ngx.get_phase() ~= 'init' and ngx.get_phase() ~= 'init_worker' then
     error('Prometheus.init can only be called from ' ..
       'init_by_lua_block or init_worker_by_lua_block', 2)
@@ -709,6 +712,13 @@ function Prometheus.init(dict_name, options_or_prefix)
   local self = setmetatable({}, mt)
   dict_name = dict_name or "prometheus_metrics"
   self.dict_name = dict_name
+  self.lock, _ = lock:new(lock_dict_name, {
+    exptime = 60 * 60, -- hour
+    timeout = 0, -- non-blocking
+  })
+  if not self.lock then
+    error("Failed to create lock for synching metrics: ")
+  end
   self.dict = ngx.shared[dict_name]
   if self.dict == nil then
     error("Dictionary '" .. dict_name .. "' does not seem to exist. " ..
@@ -728,7 +738,7 @@ function Prometheus.init(dict_name, options_or_prefix)
   end
 
   self.registry = {}
-  self.key_index = key_index_lib.new(self.dict, KEY_INDEX_PREFIX, function(metric_key)
+  self.key_index = key_index_lib.new(self.dict, self.lock, KEY_INDEX_PREFIX, function(metric_key)
     -- When another worker calls reset or del on a metric, reset that
     -- metric's local lookup table.
     local metric_name = ngx_re_gsub(metric_key, "{.*", "", "jo")
@@ -750,7 +760,7 @@ function Prometheus.init(dict_name, options_or_prefix)
   self:counter(self.error_metric_name, "Number of nginx-lua-prometheus errors")
   self.dict:set(self.error_metric_name, 0)
   local err = self.key_index:add(self.error_metric_name, ERR_MSG_LRU_EVICTION)
-  if err then
+  if err and self.key_index.first_synced then
     self:log_error(err)
   end
 
@@ -788,15 +798,16 @@ function Prometheus:init_worker(sync_interval)
   end
   self._counter = counter_instance
 
-  local resync = function(_)
+  local resync
+  resync = function(_)
       self.key_index:sync()
-      if self.key_index.incomplete_sync then
-        ngx.timer.at(0.01 + (0.01 * math.random()), resync)
+      if not self.key_index.first_synced then
+        ngx.timer.at(0.01, resync)
       else
         ngx.timer.at(self.sync_interval, resync)
       end
   end
-  ngx.timer.at(self.sync_interval, resync)
+  ngx.timer.at(0.01, resync)
 end
 
 -- Register a new metric.
@@ -930,7 +941,7 @@ function Prometheus:metric_data()
     ngx.log(ngx.ERR, "Prometheus module has not been initialized")
     return
   end
-  if self.key_index.incomplete_sync then
+  if not self.key_index.first_synced then
     return
   end
 
@@ -981,6 +992,9 @@ end
 -- It will get the metrics from the dictionary, sort them, and expose them
 -- aling with TYPE and HELP comments.
 function Prometheus:collect()
+  if not self.key_index.first_synced then
+    ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE) -- 503 status code
+  end
   ngx.header.content_type = "text/plain"
   ngx.print(self:metric_data())
 end

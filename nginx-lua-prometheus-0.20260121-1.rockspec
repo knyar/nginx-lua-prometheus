@@ -1,21 +1,18 @@
--- Note, this file must have version in its name
--- (see https://github.com/knyar/nginx-lua-prometheus/issues/27)
 package = "nginx-lua-prometheus"
-version = "0.20240525-1"
+version = "0.20260121-1"
 
 source = {
-  url = "git+https://github.com/knyar/nginx-lua-prometheus.git",
-  tag = "0.20240525",
+  url = "git+https://github.com/solidwall/nginx-lua-prometheus.git",
 }
 
 description = {
   summary = "Prometheus metric library for Nginx",
-  homepage = "https://github.com/knyar/nginx-lua-prometheus",
-  license = "MIT",
+  homepage = "https://github.com/solidwall/nginx-lua-prometheus",
 }
 
 dependencies = {
   "lua >= 5.1",
+  "lua-resty-lock",
 }
 
 build = {

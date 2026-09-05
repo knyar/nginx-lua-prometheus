@@ -12,41 +12,16 @@
 -- consistent"; it can take up to a single counter sync interval (which
 -- defaults to 1 second) for counter values to be visible for collection.
 --
--- Prometheus requires that (a) all samples for a given metric are presented
--- as one uninterrupted group, and (b) buckets of a histogram appear in
--- increasing numerical order. We satisfy that by carefully constructing full
--- metric names (i.e. metric name along with all labels) so that they meet
--- those requirements while being sorted alphabetically. In particular:
+-- Histogram observations update one disjoint range counter and the sum.
+-- Each histogram label set has one descriptor in a separate versioned index;
+-- collection reads each range once and builds the cumulative Prometheus buckets,
+-- including empty ranges. This avoids false ranges when worker flushes overlap
+-- collection. The +Inf bucket and _count use the same computed total.
+-- Histogram sums remain eventually consistent with those counts.
 --
---  * all labels for a given metric are presented in reproducible order (the one
---    used when labels were declared). "le" label for histogram metrics always
---    goes last;
---  * bucket boundaries (which are exposed as values of the "le" label) are
---    stored as floating point numbers with leading and trailing zeroes,
---    and those zeros would be removed just before we expose the metrics;
---  * internally "+Inf" bucket is stored as "Inf" (to make it appear after
---    all numeric buckets), and gets replaced by "+Inf" just before we
---    expose the metrics.
---
--- For example, if you define your bucket boundaries as {0.00005, 10, 1000}
--- then we will keep the following samples for a metric `m1` with label
--- `site` set to `site1`:
---
---   m1_bucket{site="site1",le="0000.00005"}
---   m1_bucket{site="site1",le="0010.00000"}
---   m1_bucket{site="site1",le="1000.00000"}
---   m1_bucket{site="site1",le="Inf"}
---   m1_count{site="site1"}
---   m1_sum{site="site1"}
---
--- And when exposing the metrics, their names will be changed to:
---
---   m1_bucket{site="site1",le="0.00005"}
---   m1_bucket{site="site1",le="10"}
---   m1_bucket{site="site1",le="1000"}
---   m1_bucket{site="site1",le="+Inf"}
---   m1_count{site="site1"}
---   m1_sum{site="site1"}
+-- Existing counter and gauge storage is unchanged. Histogram storage includes
+-- the bucket layout and a format version so old cumulative cells are never
+-- interpreted as disjoint counts after a reload.
 --
 -- You can find the latest version and documentation at
 -- https://github.com/knyar/nginx-lua-prometheus
@@ -98,6 +73,8 @@ local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
 
 -- Prefix for internal shared dictionary items.
 local KEY_INDEX_PREFIX = "__ngx_prom__"
+-- Keep disjoint cells and their index separate from older cumulative histograms.
+local HISTOGRAM_PREFIX = KEY_INDEX_PREFIX .. "histogram_v1_"
 
 local METRICS_KEY_REGEX = [[(.*[,{]le=")(.*)(".*)]]
 
@@ -368,10 +345,9 @@ end
 --
 -- Returns:
 --   - If `self` is a counter or a gauge: full metric name as a string.
---   - If `self` is a histogram metric: a list of strings:
---     [0]: full name of the _count histogram metric;
---     [1]: full name of the _sum histogram metric;
---     [...]: full names of each _bucket metrics.
+--   - If `self` is a histogram metric: an array of internal cell names:
+--     [1]: sum; [2..]: disjoint buckets followed by the overflow bucket.
+--     Only the escaped base series name is published in the histogram index.
 local function lookup_or_create(self, label_values)
   local cnt = label_values and #label_values or 0
   if cnt ~= self.label_count then
@@ -407,40 +383,26 @@ local function lookup_or_create(self, label_values)
     return full_name
   end
 
+  local index_key
   if self.typ == TYPE_HISTOGRAM then
-    -- Pass empty metric name to full_metric_name to just get the formatted
-    -- labels ({key1="value1",key2="value2",...}).
-    local labels = full_metric_name("", self.label_names, label_values)
-    full_name = {
-      self.name .. "_count" .. labels,
-      self.name .. "_sum" .. labels,
-    }
-
-    local bucket_pref
-    if self.label_count > 0 then
-      -- strip last }
-      bucket_pref = self.name .. "_bucket" .. string.sub(labels, 1, #labels-1) .. ","
-    else
-      bucket_pref = self.name .. "_bucket{"
+    -- Publish one complete series descriptor, never individual bucket keys.
+    -- The descriptor preserves the original escaped labels for every worker.
+    index_key = full_metric_name(self.name, self.label_names, label_values)
+    local prefix = self.histogram_prefix .. index_key .. ":"
+    full_name = {prefix .. "sum"}
+    for i = 1, self.bucket_count + 1 do
+      full_name[i + 1] = prefix .. i
     end
-
-    for i, buc in ipairs(self.buckets) do
-      full_name[i+2] = string.format("%sle=\"%s\"}", bucket_pref, self.bucket_format:format(buc))
-    end
-    -- Last bucket. Note, that the label value is "Inf" rather than "+Inf"
-    -- required by Prometheus. This is necessary for this bucket to be the last
-    -- one when all metrics are lexicographically sorted. "Inf" will get replaced
-    -- by "+Inf" in Prometheus:metric_data().
-    full_name[self.bucket_count+3] = string.format("%sle=\"Inf\"}", bucket_pref)
   else
     full_name = full_metric_name(self.name, self.label_names, label_values)
+    index_key = full_name
   end
-  t[LEAF_KEY] = full_name
 
-  local err = self._key_index:add(full_name, ERR_MSG_LRU_EVICTION)
+  local err = self._key_index:add(index_key, ERR_MSG_LRU_EVICTION)
   if err then
     return nil, err
   end
+  t[LEAF_KEY] = full_name
   return full_name
 end
 
@@ -594,26 +556,17 @@ local function observe(self, value, label_values)
     self._counter = c
   end
 
-  -- _count metric.
-  c:incr(keys[1], 1)
+  c:incr(keys[1], value)
 
-  -- _sum metric.
-  c:incr(keys[2], value)
-
-  -- the last bucket (le="Inf").
-  c:incr(keys[self.bucket_count+3], 1)
-
-  local seen = false
-  -- check in reverse order, otherwise we will always
-  -- need to traverse the whole table.
-  for i=self.bucket_count, 1, -1 do
+  -- Store one disjoint range. Cumulative buckets are built during collection.
+  local bucket = self.bucket_count + 1
+  for i = 1, self.bucket_count do
     if value <= self.buckets[i] then
-      c:incr(keys[2+i], 1)
-      seen = true
-    elseif seen then
+      bucket = i
       break
     end
   end
+  c:incr(keys[bucket + 1], 1)
 end
 
 -- Delete all metrics for a given gauge, counter or a histogram.
@@ -633,21 +586,26 @@ local function reset(self)
     ngx.sleep(self.parent.sync_interval)
   end
 
-  local keys = self._key_index:list()
-  local name_prefixes = {}
-  local name_prefix_length_base = #self.name
   if self.typ == TYPE_HISTOGRAM then
-    if self.label_count == 0 then
-      name_prefixes[self.name .. "_count"] = name_prefix_length_base + 6
-      name_prefixes[self.name .. "_sum"] = name_prefix_length_base + 4
-    else
-      name_prefixes[self.name .. "_count{"] = name_prefix_length_base + 7
-      name_prefixes[self.name .. "_sum{"] = name_prefix_length_base + 5
+    for _, marker in ipairs(self._key_index:list()) do
+      if marker == self.name or marker:sub(1, #self.name + 1) == self.name .. "{" then
+        local prefix = self.histogram_prefix .. marker .. ":"
+        self._dict:delete(prefix .. "sum")
+        for i = 1, self.bucket_count + 1 do
+          self._dict:delete(prefix .. i)
+        end
+        local err = self._key_index:remove(marker, ERR_MSG_LRU_EVICTION)
+        if err then
+          self._log_error(err)
+        end
+      end
     end
-    name_prefixes[self.name .. "_bucket{"] = name_prefix_length_base + 8
-  else
-    name_prefixes[self.name .. "{"] = name_prefix_length_base + 1
+    self.lookup = {}
+    return
   end
+
+  local keys = self._key_index:list()
+  local name_prefixes = {[self.name .. "{"] = #self.name + 1}
 
   for _, key in ipairs(keys) do
     local value, key_err = self._dict:get(key)
@@ -728,7 +686,7 @@ function Prometheus.init(dict_name, options_or_prefix)
   end
 
   self.registry = {}
-  self.key_index = key_index_lib.new(self.dict, KEY_INDEX_PREFIX, function(metric_key)
+  local function reset_lookup(metric_key)
     -- When another worker calls reset or del on a metric, reset that
     -- metric's local lookup table.
     local metric_name = ngx_re_gsub(metric_key, "{.*", "", "jo")
@@ -743,7 +701,10 @@ function Prometheus.init(dict_name, options_or_prefix)
     if m and m.typ == TYPE_HISTOGRAM then
       m.lookup = {}
     end
-  end)
+  end
+  self.key_index = key_index_lib.new(self.dict, KEY_INDEX_PREFIX, reset_lookup)
+  self.histogram_key_index = key_index_lib.new(
+    self.dict, HISTOGRAM_PREFIX .. "index_", reset_lookup)
 
   self.initialized = true
 
@@ -790,6 +751,7 @@ function Prometheus:init_worker(sync_interval)
 
   ngx.timer.every(self.sync_interval, function (_)
     self.key_index:sync()
+    self.histogram_key_index:sync()
   end)
 end
 
@@ -872,6 +834,10 @@ local function register(self, name, help, label_names, buckets, typ)
     metric.buckets = buckets or DEFAULT_BUCKETS
     metric.bucket_count = #metric.buckets
     metric.bucket_format = construct_bucket_format(metric.buckets)
+    metric._key_index = self.histogram_key_index
+    -- A changed bucket layout must not reinterpret cells from another layout.
+    metric.histogram_prefix = HISTOGRAM_PREFIX ..
+      ngx.md5(table.concat(metric.buckets, ",")) .. ":"
   end
 
   self.registry[name] = metric
@@ -914,6 +880,56 @@ function Prometheus:histogram(name, help, label_names, buckets)
   return register(self, name, help, label_names, buckets, TYPE_HISTOGRAM)
 end
 
+-- Read each disjoint cell once, then generate every configured cumulative
+-- bucket from those same reads. Mixing worker flushes cannot populate an empty
+-- range. Missing cells are zero; actual read errors suppress the whole series.
+local function collect_histogram(self, metric, marker, output, seen_metrics)
+  local prefix = metric.histogram_prefix .. marker .. ":"
+  local counts, count = {}, 0
+  for i = 1, metric.bucket_count + 1 do
+    yield()
+    local value, err = self.dict:get(prefix .. i)
+    if err then
+      self:log_error("Error getting '", prefix .. i, "': ", err)
+      return
+    end
+    count = count + (value or 0)
+    counts[i] = count
+  end
+  local sum, err = self.dict:get(prefix .. "sum")
+  if err then
+    self:log_error("Error getting '", prefix .. "sum", "': ", err)
+    return
+  end
+
+  if not seen_metrics[metric.name] then
+    if metric.help then
+      table_insert_tail(output, string.format("# HELP %s%s %s\n",
+        self.prefix, metric.name, metric.help))
+    end
+    table_insert_tail(output, string.format("# TYPE %s%s histogram\n",
+      self.prefix, metric.name))
+    seen_metrics[metric.name] = true
+  end
+  local labels = marker:sub(#metric.name + 1)
+  local bucket_prefix = metric.name .. "_bucket{"
+  if #labels > 2 then
+    bucket_prefix = metric.name .. "_bucket" .. labels:sub(1, -2) .. ","
+  end
+  for i = 1, metric.bucket_count + 1 do
+    local bound = "+Inf"
+    if i <= metric.bucket_count then
+      bound = tostring(tonumber(metric.bucket_format:format(metric.buckets[i])))
+    end
+    table_insert_tail(output, string.format('%s%sle="%s"} %s\n',
+      self.prefix, bucket_prefix, bound, counts[i]))
+  end
+  table_insert_tail(output, string.format("%s%s_count%s %s\n",
+    self.prefix, metric.name, labels, count))
+  table_insert_tail(output, string.format("%s%s_sum%s %s\n",
+    self.prefix, metric.name, labels, sum or 0))
+end
+
 -- Prometheus compatible metric data as an array of strings.
 --
 -- Returns:
@@ -938,7 +954,15 @@ function Prometheus:metric_data()
   for _, key in ipairs(keys) do
     yield()
 
-    local value, err = self.dict:get(key)
+    -- Ignore cumulative histogram keys left in the old index after a reload.
+    local name = key:match("^[^{]+")
+    local metric = self.registry[name] or self.registry[
+      name:match("^(.*)_bucket$") or name:match("^(.*)_count$") or
+      name:match("^(.*)_sum$")]
+    local value, err
+    if not metric or metric.typ ~= TYPE_HISTOGRAM then
+      value, err = self.dict:get(key)
+    end
     if value then
       local short_name = short_metric_name(key)
       if not seen_metrics[short_name] then
@@ -961,6 +985,14 @@ function Prometheus:metric_data()
       if type(err) == "string" then
         self:log_error("Error getting '", key, "': ", err)
       end
+    end
+  end
+  local histograms = self.histogram_key_index:list()
+  table.sort(histograms)
+  for _, marker in ipairs(histograms) do
+    local metric = self.registry[marker:match("^[^{]+")]
+    if metric and metric.typ == TYPE_HISTOGRAM then
+      collect_histogram(self, metric, marker, output, seen_metrics)
     end
   end
   return output

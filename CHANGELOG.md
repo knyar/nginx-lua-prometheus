@@ -4,6 +4,18 @@ This file only calls out major changes. Please see [the list of Git commits](
 https://github.com/knyar/nginx-lua-prometheus/commits/master) for the full list
 of changes.
 
+## Unreleased
+
+- Store histogram observations in disjoint buckets and derive cumulative buckets
+  during collection. This prevents concurrent worker flushes from manufacturing
+  observations in empty ranges or exposing a `+Inf` bucket different from `_count`.
+  Empty buckets are now included as zero-valued samples.
+- Histogram storage uses a new namespace. Existing histogram values are not
+  migrated, so upgrading resets histogram series. Restart nginx or use a fresh
+  shared dictionary when upgrading or changing bucket boundaries; a graceful
+  reload retains old storage and can serve old and new histogram series while
+  workers overlap. Counter and gauge storage is unchanged.
+
 ## 0.20240525
 
 - Fixed a bug that prevented usage of metrics that had previously been reset

@@ -348,9 +348,14 @@ Records a value in a previously registered histogram. Usually called from
 [log_by_lua_block](https://github.com/openresty/lua-nginx-module#log_by_lua_block)
 globally or per server/location.
 
-Note that recording an observation requires incrementing several histogram
-counters, which does not happen atomically and might race with metric
-collection (see #161).
+Each observation increments one disjoint bucket counter and the sum. Collection
+reads each bucket counter once and derives the cumulative buckets and `_count`
+from those reads. Concurrent worker flushes cannot create observations in an
+empty range, and the `+Inf` bucket always equals `_count`.
+
+Observations remain eventually consistent across workers. The bucket reads and
+`_sum` do not form a single atomic snapshot, so an observation may become visible
+in the sum and count in different scrapes.
 
 * `value` is a value that should be recorded. Required.
 * `label_values` is an array of label values.

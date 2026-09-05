@@ -69,6 +69,8 @@ Nginx.worker = {}
 function Nginx.worker.id()
   return 'testworker'
 end
+-- Tests only need distinct, deterministic keys for different bucket layouts.
+function Nginx.md5(value) return value end
 function Nginx.sleep() end
 Nginx.timer = {}
 function Nginx.timer.every(_, _, _) end
@@ -97,6 +99,23 @@ local function find_idx(table, element)
       return idx
     end
   end
+end
+
+-- Read the public exposition instead of depending on histogram storage keys.
+local function samples(prometheus)
+  local result = {}
+  for _, line in ipairs(prometheus:metric_data()) do
+    if line:sub(1, 1) ~= "#" then
+      local key, value = line:match("^(.-) ([^ ]+)\n$")
+      luaunit.assertEquals(result[key], nil, "duplicate sample: " .. key)
+      result[key] = assert(tonumber(value))
+    end
+  end
+  return result
+end
+
+local function sample(prometheus, key)
+  return samples(prometheus)[key]
 end
 
 TestPrometheus = {}
@@ -268,10 +287,10 @@ function TestPrometheus:testErrorIncorrectLabels()
 
   self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("metric1"), nil)
-  luaunit.assertEquals(self.dict:get("l1_count"), nil)
+  luaunit.assertEquals(sample(self.p, "l1_count"), nil)
   luaunit.assertEquals(self.dict:get("gauge1"), nil)
   luaunit.assertEquals(self.dict:get("gauge2"), nil)
-  luaunit.assertEquals(self.dict:get("l1_count"), nil)
+  luaunit.assertEquals(sample(self.p, "l1_count"), nil)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 13)
   luaunit.assertEquals(#ngx.logs, 13)
 end
@@ -283,7 +302,7 @@ function TestPrometheus:testNumericLabelValues()
   self.p._counter:sync()
   luaunit.assertEquals(self.dict:get('metric2{f2="0",f1="15.5"}'), 1)
   luaunit.assertEquals(self.dict:get('gauge2{f2="0",f1="15.5"}'), 1)
-  luaunit.assertEquals(self.dict:get('l2_sum{var="-3",site="90000"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l2_sum{var="-3",site="90000"}'), 1)
   luaunit.assertEquals(ngx.logs, nil)
 end
 function TestPrometheus:testMultibyteLabelValues()
@@ -303,8 +322,8 @@ function TestPrometheus:testMultibyteLabelValues()
   luaunit.assertEquals(self.dict:get('metric2{f2="¢€𤭢",f1="Pay in €. Thanks."}'), 1)
   luaunit.assertEquals(self.dict:get('gauge2{f2="z\001",f1="\002"}'), 1)
   luaunit.assertEquals(self.dict:get('gauge2{f2="",f1="\237\129\128"}'), 1)
-  luaunit.assertEquals(self.dict:get('l2_sum{var="",site="fooшbar"}'), 1)
-  luaunit.assertEquals(self.dict:get('l2_sum{var="\244\143\143\143",site=""}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l2_sum{var="",site="fooшbar"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l2_sum{var="\244\143\143\143",site=""}'), 1)
   luaunit.assertEquals(ngx.logs, nil)
 end
 function TestPrometheus:testNoValues()
@@ -487,35 +506,35 @@ function TestPrometheus:testReset()
   self.p._counter:sync()
   luaunit.assertEquals(self.dict:get("metric1"), 4)
   luaunit.assertEquals(self.dict:get("gauge1"), 3)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.300"}'), nil)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.400"}'), 2)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.500"}'), 2)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="Inf"}'), 2)
-  luaunit.assertEquals(self.dict:get('l1_count'), 2)
-  luaunit.assertEquals(self.dict:get('l1_sum'), 0.75)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="00.005"}'), 1)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="00.100"}'), 1)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="00.200"}'), 2)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="Inf"}'), 2)
-  luaunit.assertEquals(self.dict:get('l2_count{var="ok",site="site1"}'), 2)
-  luaunit.assertEquals(self.dict:get('l2_sum{var="ok",site="site1"}'), 0.151)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.3"}'), 0)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.4"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.5"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="+Inf"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l1_count'), 2)
+  luaunit.assertEquals(sample(self.p, 'l1_sum'), 0.75)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="0.005"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="0.1"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="0.2"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="+Inf"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l2_count{var="ok",site="site1"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l2_sum{var="ok",site="site1"}'), 0.151)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
   self.hist1:reset()
   self.p.key_index:sync()
   luaunit.assertEquals(self.dict:get("metric1"), 4)
   luaunit.assertEquals(self.dict:get("gauge1"), 3)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.400"}'), nil)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.500"}'), nil)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="Inf"}'), nil)
-  luaunit.assertEquals(self.dict:get('l1_count'), nil)
-  luaunit.assertEquals(self.dict:get('l1_sum'), nil)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="00.005"}'), 1)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="00.100"}'), 1)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="00.200"}'), 2)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="Inf"}'), 2)
-  luaunit.assertEquals(self.dict:get('l2_count{var="ok",site="site1"}'), 2)
-  luaunit.assertEquals(self.dict:get('l2_sum{var="ok",site="site1"}'), 0.151)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.4"}'), nil)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.5"}'), nil)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="+Inf"}'), nil)
+  luaunit.assertEquals(sample(self.p, 'l1_count'), nil)
+  luaunit.assertEquals(sample(self.p, 'l1_sum'), nil)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="0.005"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="0.1"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="0.2"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="+Inf"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l2_count{var="ok",site="site1"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l2_sum{var="ok",site="site1"}'), 0.151)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
   self.hist1:observe(0.35)
@@ -524,17 +543,17 @@ function TestPrometheus:testReset()
   self.p.key_index:sync()
   luaunit.assertEquals(self.dict:get("metric1"), 4)
   luaunit.assertEquals(self.dict:get("gauge1"), 3)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.400"}'), 1)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.500"}'), 1)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="Inf"}'), 1)
-  luaunit.assertEquals(self.dict:get('l1_count'), 1)
-  luaunit.assertEquals(self.dict:get('l1_sum'), 0.35)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="00.005"}'), nil)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="00.100"}'), nil)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="00.200"}'), nil)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="Inf"}'), nil)
-  luaunit.assertEquals(self.dict:get('l2_count{var="ok",site="site1"}'), nil)
-  luaunit.assertEquals(self.dict:get('l2_sum{var="ok",site="site1"}'), nil)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.4"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.5"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="+Inf"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l1_count'), 1)
+  luaunit.assertEquals(sample(self.p, 'l1_sum'), 0.35)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="0.005"}'), nil)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="0.1"}'), nil)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="0.2"}'), nil)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="+Inf"}'), nil)
+  luaunit.assertEquals(sample(self.p, 'l2_count{var="ok",site="site1"}'), nil)
+  luaunit.assertEquals(sample(self.p, 'l2_sum{var="ok",site="site1"}'), nil)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
 
   -- Set a gauge value that will be reset by another worker.
@@ -565,12 +584,12 @@ function TestPrometheus:testReset()
   self.hist1:reset()
   self.hist1:observe(0.44)
   self.p._counter:sync()
-  luaunit.assertEquals(self.dict:get('l1_sum'), 0.44)
+  luaunit.assertEquals(sample(self.p, 'l1_sum'), 0.44)
   luaunit.assertNotEquals(self.hist1.lookup, {})
 
   self.hist1_p2:reset()
   self.p.key_index:sync()
-  luaunit.assertEquals(self.dict:get('l1_sum'), nil)
+  luaunit.assertEquals(sample(self.p, 'l1_sum'), nil)
   luaunit.assertEquals(self.hist1.lookup, {})
   luaunit.assertEquals(self.hist1_p2.lookup, {})
 
@@ -595,28 +614,28 @@ function TestPrometheus:testLatencyHistogram()
   self.hist2:observe(0.15, {"ok", "site1"})
 
   self.p._counter:sync()
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.300"}'), nil)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.400"}'), 2)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.500"}'), 2)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="Inf"}'), 2)
-  luaunit.assertEquals(self.dict:get('l1_count'), 2)
-  luaunit.assertEquals(self.dict:get('l1_sum'), 0.75)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="00.005"}'), 1)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="00.100"}'), 1)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="00.200"}'), 2)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site1",le="Inf"}'), 2)
-  luaunit.assertEquals(self.dict:get('l2_count{var="ok",site="site1"}'), 2)
-  luaunit.assertEquals(self.dict:get('l2_sum{var="ok",site="site1"}'), 0.151)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.3"}'), 0)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.4"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.5"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="+Inf"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l1_count'), 2)
+  luaunit.assertEquals(sample(self.p, 'l1_sum'), 0.75)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="0.005"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="0.1"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="0.2"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site1",le="+Inf"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l2_count{var="ok",site="site1"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l2_sum{var="ok",site="site1"}'), 0.151)
 
   -- test observing a zero value
   self.hist1:observe(0)
   self.p._counter:sync()
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.300"}'), 1)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.400"}'), 3)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.500"}'), 3)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="Inf"}'), 3)
-  luaunit.assertEquals(self.dict:get('l1_count'), 3)
-  luaunit.assertEquals(self.dict:get('l1_sum'), 0.75)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.3"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.4"}'), 3)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.5"}'), 3)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="+Inf"}'), 3)
+  luaunit.assertEquals(sample(self.p, 'l1_count'), 3)
+  luaunit.assertEquals(sample(self.p, 'l1_sum'), 0.75)
 
   luaunit.assertEquals(ngx.logs, nil)
   luaunit.assertEquals(self.dict:get("nginx_metric_errors_total"), 0)
@@ -636,12 +655,12 @@ function TestPrometheus:testLabelEscaping()
   luaunit.assertEquals(self.dict:get('gauge2{f2="v2",f1="\\""}'), 1)
   luaunit.assertEquals(self.dict:get('gauge2{f2="v2",f1="\\\\"}'), 5)
   luaunit.assertEquals(self.dict:get('gauge2{f2="v3",f1="foo\\nbar"}'), 7)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site\\"1",le="00.005"}'), 1)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site\\"1",le="00.100"}'), 1)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site\\"1",le="00.200"}'), 2)
-  luaunit.assertEquals(self.dict:get('l2_bucket{var="ok",site="site\\"1",le="Inf"}'), 2)
-  luaunit.assertEquals(self.dict:get('l2_count{var="ok",site="site\\"1"}'), 2)
-  luaunit.assertEquals(self.dict:get('l2_sum{var="ok",site="site\\"1"}'), 0.151)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site\\"1",le="0.005"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site\\"1",le="0.1"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site\\"1",le="0.2"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l2_bucket{var="ok",site="site\\"1",le="+Inf"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l2_count{var="ok",site="site\\"1"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l2_sum{var="ok",site="site\\"1"}'), 0.151)
   luaunit.assertEquals(ngx.logs, nil)
 end
 function TestPrometheus:testCustomBucketer1()
@@ -651,14 +670,14 @@ function TestPrometheus:testCustomBucketer1()
   hist3:observe(0.151, {"ok"})
 
   self.p._counter:sync()
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.300"}'), nil)
-  luaunit.assertEquals(self.dict:get('l1_bucket{le="00.400"}'), 1)
-  luaunit.assertEquals(self.dict:get('l3_bucket{var="ok",le="1.0"}'), 1)
-  luaunit.assertEquals(self.dict:get('l3_bucket{var="ok",le="2.0"}'), 2)
-  luaunit.assertEquals(self.dict:get('l3_bucket{var="ok",le="3.0"}'), 2)
-  luaunit.assertEquals(self.dict:get('l3_bucket{var="ok",le="Inf"}'), 2)
-  luaunit.assertEquals(self.dict:get('l3_count{var="ok"}'), 2)
-  luaunit.assertEquals(self.dict:get('l3_sum{var="ok"}'), 2.151)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.3"}'), 0)
+  luaunit.assertEquals(sample(self.p, 'l1_bucket{le="0.4"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l3_bucket{var="ok",le="1"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l3_bucket{var="ok",le="2"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l3_bucket{var="ok",le="3"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l3_bucket{var="ok",le="+Inf"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l3_count{var="ok"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l3_sum{var="ok"}'), 2.151)
   luaunit.assertEquals(ngx.logs, nil)
 end
 function TestPrometheus:testCustomBucketer2()
@@ -670,14 +689,151 @@ function TestPrometheus:testCustomBucketer2()
   hist3:observe(70000, {"ok"})
 
   self.p._counter:sync()
-  luaunit.assertEquals(self.dict:get('l3_bucket{var="ok",le="00000.000005"}'), 1)
-  luaunit.assertEquals(self.dict:get('l3_bucket{var="ok",le="00005.000000"}'), 2)
-  luaunit.assertEquals(self.dict:get('l3_bucket{var="ok",le="50000.000000"}'), 3)
-  luaunit.assertEquals(self.dict:get('l3_bucket{var="ok",le="Inf"}'), 4)
-  luaunit.assertEquals(self.dict:get('l3_count{var="ok"}'), 4)
-  luaunit.assertEquals(self.dict:get('l3_sum{var="ok"}'), 70010.000001)
+  luaunit.assertEquals(sample(self.p, 'l3_bucket{var="ok",le="5e-06"}'), 1)
+  luaunit.assertEquals(sample(self.p, 'l3_bucket{var="ok",le="5"}'), 2)
+  luaunit.assertEquals(sample(self.p, 'l3_bucket{var="ok",le="50000"}'), 3)
+  luaunit.assertEquals(sample(self.p, 'l3_bucket{var="ok",le="+Inf"}'), 4)
+  luaunit.assertEquals(sample(self.p, 'l3_count{var="ok"}'), 4)
+  luaunit.assertEquals(sample(self.p, 'l3_sum{var="ok"}'), 70010.000001)
   luaunit.assertEquals(ngx.logs, nil)
 end
+function TestPrometheus:testHistogramConcurrentFlush()
+  local histogram = self.p:histogram("race", nil, nil, {1, 10, 100})
+  histogram:observe(0.5)
+  self.p._counter:sync()
+  local before = {}
+  for key, value in pairs(self.dict.dict) do before[key] = value end
+
+  -- Prepare another worker's real counter flush without relying on the
+  -- histogram's internal key format. Library instances in this test process
+  -- normally share a worker-local increment buffer, so give it its own.
+  histogram:observe(0.5)
+  self.p._counter:sync()
+  local increments = {}
+  for key, value in pairs(self.dict.dict) do
+    if type(value) == "number" and value ~= before[key] then
+      increments[key] = value - (before[key] or 0)
+    end
+  end
+  self.dict.dict = before
+  local writer = setmetatable({
+    dict = self.dict, increments = increments,
+    error_metric_name = self.p.error_metric_name,
+  }, getmetatable(self.p._counter))
+
+  local flushed = false
+  self.dict.get = function(dict, key)
+    local value, err = SimpleDict.get(dict, key)
+    if not flushed and increments[key] then
+      flushed = true
+      writer:sync()
+    end
+    return value, err
+  end
+  local raced = samples(self.p)
+  luaunit.assertEquals(flushed, true)
+  -- Both observations are fast. A flush between bucket reads must not
+  -- manufacture observations in a slower range.
+  luaunit.assertEquals(raced['race_bucket{le="10"}'] -
+    raced['race_bucket{le="1"}'], 0)
+  luaunit.assertEquals(raced['race_bucket{le="+Inf"}'] -
+    raced['race_bucket{le="100"}'], 0)
+  luaunit.assertEquals(raced.race_count, raced['race_bucket{le="+Inf"}'])
+  luaunit.assertEquals(sample(self.p, 'race_bucket{le="1"}'), 2)
+end
+
+function TestPrometheus:testHistogramCompleteBuckets()
+  local short = self.p:histogram("short", nil, nil, {1, 2})
+  local extended = self.p:histogram("extended", nil, nil, {1, 2, 100, 10000})
+  short:observe(1.5)
+  extended:observe(1.5)
+  local values = samples(self.p)
+  for _, name in ipairs({"short", "extended"}) do
+    luaunit.assertEquals(values[name .. '_bucket{le="1"}'], 0)
+    luaunit.assertEquals(values[name .. '_bucket{le="2"}'], 1)
+    luaunit.assertEquals(values[name .. '_bucket{le="+Inf"}'], 1)
+    luaunit.assertEquals(values[name .. '_count'], 1)
+  end
+  -- Adding unused upper bounds must not create any new slow observations.
+  luaunit.assertEquals(values['extended_bucket{le="100"}'], 1)
+  luaunit.assertEquals(values['extended_bucket{le="10000"}'], 1)
+end
+
+function TestPrometheus:testHistogramRangesAndOverflow()
+  local histogram = self.p:histogram("ranges", nil, nil, {1, 10, 100})
+  for _, value in ipairs({0.5, 1, 2, 10, 100, 101}) do
+    histogram:observe(value)
+  end
+  local values = samples(self.p)
+  luaunit.assertEquals(values['ranges_bucket{le="1"}'], 2)
+  luaunit.assertEquals(values['ranges_bucket{le="10"}'], 4)
+  luaunit.assertEquals(values['ranges_bucket{le="100"}'], 5)
+  luaunit.assertEquals(values['ranges_bucket{le="+Inf"}'], 6)
+  luaunit.assertEquals(values.ranges_count, 6)
+  luaunit.assertEquals(values.ranges_sum, 214.5)
+end
+
+function TestPrometheus:testHistogramBucketLayoutIsolation()
+  local old = self.p:histogram("layout", nil, nil, {1, 10, 100})
+  local new = self.p2:histogram("layout", nil, nil, {1, 2, 100})
+  old:observe(5)
+  self.p._counter:sync()
+  new:observe(0.5)
+  new:observe(3)
+  local values = samples(self.p2)
+  luaunit.assertEquals(values.layout_count, 2)
+  luaunit.assertEquals(values.layout_sum, 3.5)
+  luaunit.assertEquals(values['layout_bucket{le="2"}'], 1)
+  local previous = samples(self.p)
+  luaunit.assertEquals(previous.layout_count, 1)
+  luaunit.assertEquals(previous.layout_sum, 5)
+  luaunit.assertEquals(previous['layout_bucket{le="10"}'], 1)
+end
+
+function TestPrometheus:testHistogramLegacyStorageIsolation()
+  -- Simulate cumulative histogram cells left by an older library version.
+  for key, value in pairs({
+    ['legacy_bucket{le="001.0"}'] = 0,
+    ['legacy_bucket{le="010.0"}'] = 100,
+    ['legacy_bucket{le="100.0"}'] = 100,
+    ['legacy_bucket{le="Inf"}'] = 100,
+    legacy_count = 100, legacy_sum = 500,
+  }) do
+    self.dict:set(key, value)
+    self.p.key_index:add(key)
+  end
+  local histogram = self.p:histogram("legacy", nil, nil, {1, 10, 100})
+  histogram:observe(0.5)
+  local values = samples(self.p)
+  luaunit.assertEquals(values.legacy_count, 1)
+  luaunit.assertEquals(values.legacy_sum, 0.5)
+  luaunit.assertEquals(values['legacy_bucket{le="1"}'], 1)
+  luaunit.assertEquals(values['legacy_bucket{le="+Inf"}'], 1)
+end
+
+function TestPrometheus:testHistogramLabelsAfterReload()
+  for _, labeled_first in ipairs({false, true}) do
+    local name = labeled_first and "labeled_first" or "plain_first"
+    local label_names = {"site"}
+    local label_values = {'a"b\\c\nd'}
+    local old = self.p:histogram(name, nil,
+      labeled_first and label_names or nil, {1, 10})
+    local new = self.p2:histogram(name, nil,
+      not labeled_first and label_names or nil, {1, 10})
+    old:observe(0.5, labeled_first and label_values or nil)
+    self.p._counter:sync()
+    new:observe(0.5, not labeled_first and label_values or nil)
+    local values = samples(self.p2)
+    local labels = '{site="a\\"b\\\\c\\nd"}'
+    luaunit.assertEquals(values[name .. '_count'], 1)
+    luaunit.assertEquals(values[name .. '_count' .. labels], 1)
+    luaunit.assertEquals(values[name .. '_bucket{le="1"}'], 1)
+    luaunit.assertEquals(values[name .. '_bucket' ..
+      labels:sub(1, -2) .. ',le="1"}'], 1)
+    luaunit.assertEquals(values[name .. '_sum' .. labels], 0.5)
+  end
+end
+
 function TestPrometheus:testCollect()
   local hist3 = self.p:histogram("b1", "Bytes", {"var", "stale"}, {0.1, 100, 2000})
   local hist4 = self.p:histogram("b2", "Labels", {}, {100, 2000})

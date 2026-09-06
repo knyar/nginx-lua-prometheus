@@ -10,6 +10,8 @@ of changes.
   during collection. This prevents concurrent worker flushes from manufacturing
   observations in empty ranges or exposing a `+Inf` bucket different from `_count`.
   Empty buckets are now included as zero-valued samples.
+- Preserve full floating-point precision in bucket-layout fingerprints so
+  distinct boundaries do not accidentally share counters.
 - Histogram storage uses a new namespace. Existing histogram values are not
   migrated, so upgrading resets histogram series. Restart nginx or use a fresh
   shared dictionary when upgrading or changing bucket boundaries; a graceful

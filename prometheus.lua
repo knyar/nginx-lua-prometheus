@@ -835,9 +835,13 @@ local function register(self, name, help, label_names, buckets, typ)
     metric.bucket_count = #metric.buckets
     metric.bucket_format = construct_bucket_format(metric.buckets)
     metric._key_index = self.histogram_key_index
-    -- A changed bucket layout must not reinterpret cells from another layout.
+    -- Preserve double precision so distinct bucket layouts cannot share cells.
+    local bucket_keys = {}
+    for i, bucket in ipairs(metric.buckets) do
+      bucket_keys[i] = string.format("%.17g", bucket)
+    end
     metric.histogram_prefix = HISTOGRAM_PREFIX ..
-      ngx.md5(table.concat(metric.buckets, ",")) .. ":"
+      ngx.md5(table.concat(bucket_keys, ",")) .. ":"
   end
 
   self.registry[name] = metric

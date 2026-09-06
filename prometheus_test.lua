@@ -790,6 +790,23 @@ function TestPrometheus:testHistogramBucketLayoutIsolation()
   luaunit.assertEquals(previous['layout_bucket{le="10"}'], 1)
 end
 
+function TestPrometheus:testHistogramPreciseBucketLayoutIsolation()
+  local first_bound, second_bound = 0.3, 0.1 + 0.2
+  luaunit.assertNotEquals(first_bound, second_bound)
+  local old = self.p:histogram("precise", nil, nil, {first_bound, 1})
+  local new = self.p2:histogram("precise", nil, nil, {second_bound, 1})
+  old:observe(0.1)
+  self.p._counter:sync()
+  new:observe(0.2)
+
+  local values = samples(self.p2)
+  luaunit.assertEquals(values.precise_count, 1)
+  luaunit.assertEquals(values.precise_sum, 0.2)
+  local previous = samples(self.p)
+  luaunit.assertEquals(previous.precise_count, 1)
+  luaunit.assertEquals(previous.precise_sum, 0.1)
+end
+
 function TestPrometheus:testHistogramLegacyStorageIsolation()
   -- Simulate cumulative histogram cells left by an older library version.
   for key, value in pairs({

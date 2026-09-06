@@ -28,7 +28,6 @@
 local resty_counter_lib = require("prometheus_resty_counter")
 local key_index_lib = require("prometheus_keys")
 local ngx = ngx
-local ngx_re_match = ngx.re.match
 local ngx_re_gsub = ngx.re.gsub
 local error = error
 local type = type
@@ -71,8 +70,6 @@ local DEFAULT_BUCKETS = {0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.2, 0.3,
 local KEY_INDEX_PREFIX = "__ngx_prom__"
 -- Keep disjoint cells and their index separate from older cumulative histograms.
 local HISTOGRAM_PREFIX = KEY_INDEX_PREFIX .. "histogram_v1_"
-
-local METRICS_KEY_REGEX = [[(.*[,{]le=")(.*)(".*)]]
 
 local ERR_MSG_COUNTER_NOT_INITIALIZED = "counter not initialized! " ..
   "Have you called Prometheus:init() from the " ..
@@ -215,33 +212,6 @@ local function full_metric_name(name, label_names, label_values)
   return name .. "{" .. table.concat(label_parts, ",") .. "}"
 end
 
--- Extract short metric name from the full one.
---
--- This function is only used by Prometheus:metric_data.
---
--- Args:
---   full_name: (string) full metric name that can include labels.
---
--- Returns:
---   (string) short metric name with no labels. For a `*_bucket` metric of
---     histogram the _bucket suffix will be removed.
-local function short_metric_name(full_name)
-  local labels_start, _ = full_name:find("{")
-  if not labels_start then
-    return full_name
-  end
-  -- Try to detect if this is a histogram metric. We only check for the
-  -- `_bucket` suffix here, since it alphabetically goes before other
-  -- histogram suffixes (`_count` and `_sum`).
-  local suffix_idx, _ = full_name:find("_bucket{")
-  if suffix_idx and full_name:find("le=") then
-    -- this is a histogram metric
-    return full_name:sub(1, suffix_idx - 1)
-  end
-  -- this is not a histogram metric
-  return full_name:sub(1, labels_start - 1)
-end
-
 -- Check metric name and label names for correctness.
 --
 -- Regular expressions to validate metric and label names are
@@ -268,63 +238,6 @@ local function check_metric_and_label_names(metric_name, label_names)
       return "Metric '" .. metric_name .. "' label name '" .. label_name ..
              "' is invalid"
     end
-  end
-end
-
--- Construct bucket format for a list of buckets.
---
--- This receives a list of buckets and returns a sprintf template that should
--- be used for bucket boundaries to make them come in increasing order when
--- sorted alphabetically.
---
--- To re-phrase, this is where we detect how many leading and trailing zeros we
--- need.
---
--- Args:
---   buckets: a list of buckets
---
--- Returns:
---   (string) a sprintf template.
-local function construct_bucket_format(buckets)
-  local max_order = 1
-  local max_precision = 1
-  for _, bucket in ipairs(buckets) do
-    assert(type(bucket) == "number", "bucket boundaries should be numeric")
-    -- floating point number with all trailing zeros removed
-    local bucket_str = string.format("%f", bucket)
-    local as_string = ngx_re_gsub(bucket_str, "0*$", "", "jo")
-
-    local dot_idx = as_string:find(".", 1, true)
-    max_order = math.max(max_order, dot_idx - 1)
-    max_precision = math.max(max_precision, as_string:len() - dot_idx)
-  end
-  return "%0" .. (max_order + max_precision + 1) .. "." .. max_precision .. "f"
-end
-
--- Format bucket format when exposing metrics.
---
--- This function removes leading and trailing zeroes from `le` label values.
---
--- Args:
---   key: the metric key
---
--- Returns:
---   (string) the formatted key
-local function fix_histogram_bucket_labels(key)
-  local match, err = ngx_re_match(key, METRICS_KEY_REGEX, "jo")
-  if err then
-    ngx.log(ngx.ERR, "failed to match regex: ", err)
-    return
-  end
-
-  if not match then
-    return key
-  end
-
-  if match[2] == "Inf" then
-    return table.concat({match[1], "+Inf", match[3]})
-  else
-    return table.concat({match[1], tostring(tonumber(match[2])), match[3]})
   end
 end
 
@@ -685,17 +598,9 @@ function Prometheus.init(dict_name, options_or_prefix)
   local function reset_lookup(metric_key)
     -- When another worker calls reset or del on a metric, reset that
     -- metric's local lookup table.
-    local metric_name = ngx_re_gsub(metric_key, "{.*", "", "jo")
-    if self.registry[metric_name] then
-      local m = self.registry[metric_name]
-      m.lookup = {}
-      return
-    end
-
-    metric_name = ngx_re_gsub(metric_name, "_sum$", "", "jo")
-    local m = self.registry[metric_name]
-    if m and m.typ == TYPE_HISTOGRAM then
-      m.lookup = {}
+    local metric = self.registry[metric_key:match("^[^{]+")]
+    if metric then
+      metric.lookup = {}
     end
   end
   self.key_index = key_index_lib.new(self.dict, KEY_INDEX_PREFIX, reset_lookup)
@@ -749,6 +654,16 @@ function Prometheus:init_worker(sync_interval)
     self.key_index:sync()
     self.histogram_key_index:sync()
   end)
+end
+
+-- Write the HELP and TYPE comments for a metric.
+local function write_comments(self, output)
+  if self.help then
+    table_insert_tail(output, string.format("# HELP %s%s %s\n",
+      self.parent.prefix, self.name, self.help))
+  end
+  table_insert_tail(output, string.format("# TYPE %s%s %s\n",
+    self.parent.prefix, self.name, TYPE_LITERAL[self.typ]))
 end
 
 -- Register a new metric.
@@ -816,6 +731,7 @@ local function register(self, name, help, label_names, buckets, typ)
     _key_index = self.key_index,
     _dict = self.dict,
     reset = reset,
+    write_comments = write_comments,
   }
   if typ < TYPE_HISTOGRAM then
     if typ == TYPE_GAUGE then
@@ -829,11 +745,11 @@ local function register(self, name, help, label_names, buckets, typ)
     metric.observe = observe
     metric.buckets = buckets or DEFAULT_BUCKETS
     metric.bucket_count = #metric.buckets
-    metric.bucket_format = construct_bucket_format(metric.buckets)
     metric._key_index = self.histogram_key_index
     -- Preserve double precision so distinct bucket layouts cannot share cells.
     local bucket_keys = {}
     for i, bucket in ipairs(metric.buckets) do
+      assert(type(bucket) == "number", "bucket boundaries should be numeric")
       bucket_keys[i] = string.format("%.17g", bucket)
     end
     metric.histogram_prefix = HISTOGRAM_PREFIX ..
@@ -903,12 +819,7 @@ local function collect_histogram(self, metric, marker, output, seen_metrics)
   end
 
   if not seen_metrics[metric.name] then
-    if metric.help then
-      table_insert_tail(output, string.format("# HELP %s%s %s\n",
-        self.prefix, metric.name, metric.help))
-    end
-    table_insert_tail(output, string.format("# TYPE %s%s histogram\n",
-      self.prefix, metric.name))
+    metric:write_comments(output)
     seen_metrics[metric.name] = true
   end
   local labels = marker:sub(#metric.name + 1)
@@ -919,7 +830,7 @@ local function collect_histogram(self, metric, marker, output, seen_metrics)
   for i = 1, metric.bucket_count + 1 do
     local bound = "+Inf"
     if i <= metric.bucket_count then
-      bound = tostring(tonumber(metric.bucket_format:format(metric.buckets[i])))
+      bound = tostring(metric.buckets[i])
     end
     table_insert_tail(output, string.format('%s%sle="%s"} %s\n',
       self.prefix, bucket_prefix, bound, counts[i]))
@@ -928,6 +839,15 @@ local function collect_histogram(self, metric, marker, output, seen_metrics)
     self.prefix, metric.name, labels, count))
   table_insert_tail(output, string.format("%s%s_sum%s %s\n",
     self.prefix, metric.name, labels, sum or 0))
+end
+
+-- Ignore cumulative histogram keys left in the old index after a reload.
+local function should_ignore_key(key, registry)
+  local name = key:match("^[^{]+")
+  local metric = registry[name] or registry[
+    name:match("^(.*)_bucket$") or name:match("^(.*)_count$") or
+    name:match("^(.*)_sum$")]
+  return metric and metric.typ == TYPE_HISTOGRAM
 end
 
 -- Prometheus compatible metric data as an array of strings.
@@ -945,8 +865,6 @@ function Prometheus:metric_data()
   self._counter:sync()
 
   local keys = self.key_index:list()
-  -- Prometheus server expects buckets of a histogram to appear in increasing
-  -- numerical order of their label values.
   table.sort(keys)
 
   local seen_metrics = {}
@@ -954,32 +872,19 @@ function Prometheus:metric_data()
   for _, key in ipairs(keys) do
     yield()
 
-    -- Ignore cumulative histogram keys left in the old index after a reload.
-    local name = key:match("^[^{]+")
-    local metric = self.registry[name] or self.registry[
-      name:match("^(.*)_bucket$") or name:match("^(.*)_count$") or
-      name:match("^(.*)_sum$")]
     local value, err
-    if not metric or metric.typ ~= TYPE_HISTOGRAM then
+    if not should_ignore_key(key, self.registry) then
       value, err = self.dict:get(key)
     end
     if value then
-      local short_name = short_metric_name(key)
-      if not seen_metrics[short_name] then
-        local m = self.registry[short_name]
-        if m then
-          if m.help then
-            table_insert_tail(output, string.format("# HELP %s%s %s\n",
-            self.prefix, short_name, m.help))
-          end
-          if m.typ then
-            table_insert_tail(output, string.format("# TYPE %s%s %s\n",
-              self.prefix, short_name, TYPE_LITERAL[m.typ]))
-          end
+      local name = key:match("^[^{]+")
+      if not seen_metrics[name] then
+        local metric = self.registry[name]
+        if metric then
+          metric:write_comments(output)
         end
-        seen_metrics[short_name] = true
+        seen_metrics[name] = true
       end
-      key = fix_histogram_bucket_labels(key)
       table_insert_tail(output, string.format("%s%s %s\n", self.prefix, key, value))
     else
       if type(err) == "string" then

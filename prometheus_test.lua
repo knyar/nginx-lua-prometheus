@@ -78,13 +78,6 @@ function Nginx.get_phase()
   return 'init_worker'
 end
 Nginx.re = {}
-function Nginx.re.match(subject, regexp, _)
-  local result = {rex_pcre2.match(subject, regexp)}
-  if result[1] == nil or result[1] == false then
-    return nil, nil
-  end
-  return result, nil
-end
 function Nginx.re.gsub(subject, regexp, replace, _)
   local result, _, substitutions = rex_pcre2.gsub(subject, regexp, replace)
   return result, substitutions, nil
@@ -180,6 +173,41 @@ function TestPrometheus:testInitWorker()
 
   luaunit.assertEquals(#ngx.logs, 1)
   luaunit.assertStrContains(ngx.logs[1], "do not explicitly call init_worker")
+end
+function TestPrometheus:testIndexSyncTimer()
+  local tick
+  local every = ngx.timer.every
+  ngx.timer.every = function(interval, callback, argument)
+    if argument == nil then
+      luaunit.assertEquals(interval, 3)
+      tick = callback
+    end
+  end
+  local reader = require('prometheus').init("metrics", {sync_interval=3})
+  ngx.timer.every = every
+  luaunit.assertNotNil(tick)
+
+  local counter = reader:counter("timer_counter")
+  local histogram = reader:histogram("timer_histogram", nil, nil, {1, 10})
+  counter:inc(1)
+  histogram:observe(0.5)
+  reader._counter:sync()
+  self.p:counter("timer_counter"):reset()
+  self.p:histogram("timer_histogram", nil, nil, {1, 10}):reset()
+
+  luaunit.assertNotEquals(counter.lookup, {})
+  luaunit.assertNotEquals(histogram.lookup, {})
+  tick(false)
+  luaunit.assertEquals(counter.lookup, {})
+  luaunit.assertEquals(histogram.lookup, {})
+
+  counter:inc(2)
+  histogram:observe(0.25)
+  local values = samples(reader)
+  luaunit.assertEquals(values.timer_counter, 2)
+  luaunit.assertEquals(values.timer_histogram_count, 1)
+  luaunit.assertEquals(values.timer_histogram_sum, 0.25)
+  luaunit.assertEquals(values.nginx_metric_errors_total, 0)
 end
 function TestPrometheus.testErrorUnitialized()
   local p = require('prometheus')
@@ -892,6 +920,63 @@ function TestPrometheus:testHistogramLabelsAfterReload()
       labels:sub(1, -2) .. ',le="1"}'], 1)
     luaunit.assertEquals(values[name .. '_sum' .. labels], 0.5)
   end
+end
+
+function TestPrometheus:testHistogramReadErrors()
+  local histogram = self.p:histogram("read_errors", nil, {"site"}, {1, 10})
+  histogram:observe(0.5, {"broken"})
+  histogram:observe(2, {"healthy"})
+  self.gauge1:set(7)
+  local prefix = histogram.histogram_prefix .. 'read_errors{site="broken"}:'
+  for i, cell in ipairs({"1", "2", "3", "sum"}) do
+    self.dict.get = function(dict, key)
+      if key == prefix .. cell then return nil, "injected read failure" end
+      return SimpleDict.get(dict, key)
+    end
+    local values = samples(self.p)
+    for _, bound in ipairs({"1", "10", "+Inf"}) do
+      luaunit.assertNil(values['read_errors_bucket{site="broken",le="' .. bound .. '"}'])
+    end
+    luaunit.assertNil(values['read_errors_count{site="broken"}'])
+    luaunit.assertNil(values['read_errors_sum{site="broken"}'])
+    luaunit.assertEquals(values['read_errors_count{site="healthy"}'], 1)
+    luaunit.assertEquals(values['read_errors_sum{site="healthy"}'], 2)
+    luaunit.assertEquals(values.gauge1, 7)
+    luaunit.assertEquals(#ngx.logs, i)
+    luaunit.assertStrContains(ngx.logs[i], prefix .. cell)
+    luaunit.assertStrContains(ngx.logs[i], "injected read failure")
+    -- Read the error counter without triggering another failed scrape.
+    luaunit.assertEquals(self.dict:get(self.p.error_metric_name), i)
+  end
+  self.dict.get = nil
+  local recovered = samples(self.p)
+  luaunit.assertEquals(recovered['read_errors_count{site="broken"}'], 1)
+  luaunit.assertEquals(recovered['read_errors_sum{site="broken"}'], 0.5)
+  luaunit.assertEquals(#ngx.logs, 4)
+end
+
+function TestPrometheus:testHistogramResetError()
+  local histogram = self.p:histogram("reset_error", nil, {"site"}, {1, 10})
+  histogram:observe(0.5, {"a"})
+  self.hist1:observe(0.25)
+  self.p._counter:sync()
+  self.dict.incr = function(dict, key, value, init)
+    if key == histogram._key_index.delete_count then
+      return nil, "injected reset failure"
+    end
+    return SimpleDict.incr(dict, key, value, init)
+  end
+  histogram:reset()
+  self.dict.incr = nil
+
+  luaunit.assertStrContains(ngx.logs[#ngx.logs], "injected reset failure")
+  luaunit.assertEquals(histogram.lookup, {})
+  local values = samples(self.p)
+  luaunit.assertEquals(values.nginx_metric_errors_total, 1)
+  luaunit.assertNil(values['reset_error_count{site="a"}'])
+  luaunit.assertEquals(values.l1_count, 1)
+  histogram:observe(0.75, {"a"})
+  luaunit.assertEquals(sample(self.p, 'reset_error_sum{site="a"}'), 0.75)
 end
 
 function TestPrometheus:testCollect()

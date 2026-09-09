@@ -188,8 +188,9 @@ section.
 * `name` is the name of the metric.
 * `description` is the text description. Optional.
 * `label_names` is an array of label names for the metric. Optional.
-* `buckets` is an array of numbers defining bucket boundaries. Optional,
-  defaults to 20 latency buckets covering a range from 5ms to 10s (in seconds).
+* `buckets` is an array of finite numbers defining strictly increasing bucket
+  boundaries. Optional, defaults to 20 latency buckets covering a range from
+  5ms to 10s (in seconds).
 
 Returns a `histogram` object that can later be used to record samples.
 

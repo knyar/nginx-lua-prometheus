@@ -6,17 +6,19 @@ of changes.
 
 ## Unreleased
 
-- Store histogram observations in disjoint buckets and derive cumulative buckets
-  during collection. This prevents concurrent worker flushes from manufacturing
-  observations in empty ranges or exposing a `+Inf` bucket different from `_count`.
-  Empty buckets are now included as zero-valued samples.
-- Preserve full floating-point precision in bucket-layout fingerprints so
-  distinct boundaries do not accidentally share counters.
-- Histogram storage uses a new namespace. Existing histogram values are not
-  migrated, so upgrading resets histogram series. Restart nginx or use a fresh
-  shared dictionary when upgrading or changing bucket boundaries; a graceful
-  reload retains old storage and can serve old and new histogram series while
-  workers overlap. Counter and gauge storage is unchanged.
+- Fixed histogram inconsistencies during concurrent worker updates that could
+  report observations in empty ranges or cause the `+Inf` bucket to differ from
+  `_count`. Empty buckets are now always exposed.
+- Fixed a precision issue with histogram bucket labels. Now full floating-point
+  precision is preserved using a compact decimal representation.
+- Changed histogram storage to support these fixes. Existing histogram values
+  were not migrated, so upgrading resets histogram series.
+- Improved bucket boundary validation. NaN, infinite, unsorted, or duplicate
+  histogram bucket boundaries are now rejected during registration.
+
+Please restart nginx or use a fresh shared dictionary when upgrading or
+changing histogram bucket boundaries. A graceful reload retains old storage and
+can temporarily expose both old and new histogram series while workers overlap.
 
 ## 0.20240525
 

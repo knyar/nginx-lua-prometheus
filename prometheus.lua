@@ -39,6 +39,8 @@ local YIELD_ITERATIONS = 200
 
 local Prometheus = {}
 local mt = { __index = Prometheus }
+-- Module state is local to each nginx worker; dictionaries remain shared.
+local initialized_dicts = {}
 
 local TYPE_COUNTER    = 0x1
 local TYPE_GAUGE      = 0x2
@@ -619,6 +621,12 @@ function Prometheus.init(dict_name, options_or_prefix)
   if ngx.get_phase() == 'init_worker' then
     self:init_worker(self.sync_interval)
   end
+  if initialized_dicts[dict_name] then
+    ngx.log(ngx.WARN, "Multiple Prometheus instances for shared dictionary '",
+      dict_name, "' in the same worker are not supported. Reuse the existing " ..
+      "instance for metric registration and collection.")
+  end
+  initialized_dicts[dict_name] = true
   return self
 end
 

@@ -15,6 +15,8 @@ of changes.
   were not migrated, so upgrading resets histogram series.
 - Improved bucket boundary validation. NaN, infinite, unsorted, or duplicate
   histogram bucket boundaries are now rejected during registration.
+- Added a warning when multiple Prometheus instances are using the same shared
+  dictionary in one worker.
 
 Please restart nginx or use a fresh shared dictionary when upgrading or
 changing histogram bucket boundaries. A graceful reload retains old storage and

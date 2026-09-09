@@ -111,13 +111,19 @@ local function sample(prometheus, key)
   return samples(prometheus)[key]
 end
 
+-- Separate nginx workers have independent module state.
+local function worker_library()
+  return assert(loadfile("prometheus.lua"))()
+end
+
 TestPrometheus = {}
 function TestPrometheus:setUp()
   self.dict = setmetatable({}, SimpleDict)
   ngx.shared.metrics = self.dict
+  package.loaded.prometheus = nil
   self.p = require('prometheus').init('metrics')
   -- Another instance of the library to simulate a second nginx worker.
-  self.p2 = require('prometheus').init('metrics')
+  self.p2 = worker_library().init('metrics')
   self.counter1 = self.p:counter("metric1", "Metric 1")
   self.counter2 = self.p:counter("metric2", "Metric 2", {"f2", "f1"})
   self.counter3 = self.p:counter("metric3", "Metric 3", {"f3"})
@@ -137,26 +143,54 @@ function TestPrometheus:testInit()
   luaunit.assertEquals(sample(self.p, "nginx_metric_errors_total"), 0)
   luaunit.assertEquals(ngx.logs, nil)
 end
+function TestPrometheus.testDuplicateInstanceWarning()
+  local library = worker_library()
+  library.init("metrics")
+  luaunit.assertNil(ngx.logs)
+
+  -- Different dictionaries and different workers are supported.
+  ngx.shared.other_metrics = setmetatable({}, SimpleDict)
+  library.init("other_metrics")
+  worker_library().init("metrics")
+  luaunit.assertNil(ngx.logs)
+
+  local level
+  local log = ngx.log
+  ngx.log = function(severity, ...)
+    level = severity
+    log(severity, ...)
+  end
+  local second = library.init("metrics", {prefix="other_"})
+  ngx.log = log
+  luaunit.assertEquals(level, ngx.WARN)
+  luaunit.assertEquals(#ngx.logs, 1)
+  luaunit.assertStrContains(ngx.logs[1], "shared dictionary ' metrics '")
+  luaunit.assertStrContains(ngx.logs[1], "not supported")
+  luaunit.assertStrContains(ngx.logs[1], "Reuse the existing instance")
+  luaunit.assertNotNil(second)
+  luaunit.assertEquals(sample(second, "other_nginx_metric_errors_total"), 0)
+  ngx.shared.other_metrics = nil
+end
 function TestPrometheus:testInitOptions()
   self.dict = setmetatable({}, SimpleDict)
   ngx.shared.metrics = self.dict
 
-  local p1 = require('prometheus').init("metrics")
+  local p1 = worker_library().init("metrics")
   assert(p1.prefix == "")
   assert(p1.sync_interval == 1)
   assert(p1.error_metric_name == "nginx_metric_errors_total")
 
-  local p2 = require('prometheus').init("metrics", "test_pref_")
+  local p2 = worker_library().init("metrics", "test_pref_")
   assert(p2.prefix == "test_pref_")
   assert(p2.sync_interval == 1)
   assert(p2.error_metric_name == "nginx_metric_errors_total")
 
-  local p3 = require('prometheus').init("metrics", {sync_interval=3})
+  local p3 = worker_library().init("metrics", {sync_interval=3})
   assert(p3.prefix == "")
   assert(p3.sync_interval == 3)
   assert(p3.error_metric_name == "nginx_metric_errors_total")
 
-  local p4 = require('prometheus').init("metrics", {
+  local p4 = worker_library().init("metrics", {
     prefix="foo", sync_interval=3, error_metric_name="foobar"})
   assert(p4.prefix == "foo")
   assert(p4.sync_interval == 3)
@@ -168,7 +202,7 @@ function TestPrometheus:testInitWorker()
   self.dict = setmetatable({}, SimpleDict)
   ngx.shared.metrics = self.dict
 
-  local p1 = require('prometheus').init("metrics")
+  local p1 = worker_library().init("metrics")
   p1:init_worker(3)
 
   luaunit.assertEquals(#ngx.logs, 1)
@@ -183,7 +217,7 @@ function TestPrometheus:testIndexSyncTimer()
       tick = callback
     end
   end
-  local reader = require('prometheus').init("metrics", {sync_interval=3})
+  local reader = worker_library().init("metrics", {sync_interval=3})
   ngx.timer.every = every
   luaunit.assertNotNil(tick)
 
@@ -1110,7 +1144,7 @@ end
 function TestPrometheus:testCollectWithPrefix()
   self.dict = setmetatable({}, SimpleDict)
   ngx.shared.metrics = self.dict
-  local p = require('prometheus').init("metrics", "test_pref_")
+  local p = worker_library().init("metrics", "test_pref_")
 
   local counter1 = p:counter("metric1", "Metric 1")
   local gauge1 = p:gauge("gauge1", "Gauge 1")

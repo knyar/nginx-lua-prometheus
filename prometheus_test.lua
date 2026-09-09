@@ -282,6 +282,37 @@ function TestPrometheus:testErrorInvalidBuckets()
     luaunit.assertStrContains(err, "bucket boundaries should be numeric")
   end
 end
+function TestPrometheus:testErrorUnsortedBuckets()
+  for _, buckets in ipairs({
+    {10, 0.5, 100, 0.0000001, 2},
+    {2, 1},
+    {1, 3, 2},
+    {1, 1, 2},
+  }) do
+    local ok, err = pcall(function()
+      self.p:histogram("unsorted_buckets", nil, nil, buckets)
+    end)
+    luaunit.assertEquals(ok, false)
+    luaunit.assertStrContains(err, "bucket boundaries should be strictly increasing")
+    luaunit.assertNil(self.p.registry.unsorted_buckets)
+  end
+end
+function TestPrometheus:testErrorNonFiniteBuckets()
+  for _, buckets in ipairs({
+    {0/0}, {math.huge}, {-math.huge}, {1, math.huge}, {-math.huge, 1}, {1, 0/0},
+  }) do
+    local ok, err = pcall(function()
+      self.p:histogram("nonfinite", nil, nil, buckets)
+    end)
+    luaunit.assertFalse(ok)
+    luaunit.assertStrContains(err, "bucket boundaries should be finite")
+    luaunit.assertNil(self.p.registry.nonfinite)
+  end
+  -- A rejected registration must not reserve the name or poison later output.
+  local histogram = self.p:histogram("nonfinite", nil, nil, {-1, 0, 1})
+  histogram:observe(0.5)
+  luaunit.assertEquals(sample(self.p, 'nonfinite_bucket{le="1"}'), 1)
+end
 function TestPrometheus:testErrorDuplicateMetrics()
   self.p:counter("metric1", "Another metric 1")
   self.p:counter("l1_count", "Conflicts with Histogram 1")
@@ -734,6 +765,23 @@ function TestPrometheus:testCustomBucketer2()
   luaunit.assertEquals(sample(self.p, 'l3_sum{var="ok"}'), 70010.000001)
   luaunit.assertEquals(ngx.logs, nil)
 end
+function TestPrometheus:testHistogramBucketBoundaryOrder()
+  -- Numeric and lexicographic ordering differ for these boundaries.
+  local histogram = self.p:histogram("ordered", nil, nil,
+    {0.0000001, 0.5, 2, 10, 100})
+  histogram:observe(1)
+
+  -- Read the exposition directly: samples() discards ordering.
+  local boundaries = {}
+  for _, line in ipairs(self.p:metric_data()) do
+    local boundary = line:match('^ordered_bucket{le="([^"]+)"}')
+    if boundary then
+      table.insert(boundaries, boundary)
+    end
+  end
+  luaunit.assertEquals(boundaries, {"1e-07", "0.5", "2", "10", "100", "+Inf"})
+end
+
 function TestPrometheus:testHistogramBoundaryPrecision()
   local histogram = self.p:histogram("precision", nil, nil,
     {0.0000001, 0.123456789, 1})
@@ -745,6 +793,29 @@ function TestPrometheus:testHistogramBoundaryPrecision()
   luaunit.assertEquals(values['precision_bucket{le="0"}'], nil)
   luaunit.assertEquals(values['precision_bucket{le="+Inf"}'], 2)
   luaunit.assertEquals(values.precision_count, 2)
+end
+
+function TestPrometheus:testHistogramCalculatedBoundaryPrecision()
+  local first_bound, second_bound = 0.3, 0.1 + 0.2
+  luaunit.assertNotEquals(first_bound, second_bound)
+  local histogram = self.p:histogram("calculated", nil, nil,
+    {first_bound, second_bound})
+  histogram:observe(first_bound)
+  histogram:observe(second_bound)
+
+  -- Parse the emitted boundaries back to numbers to verify exact round trips.
+  local boundaries, counts = {}, {}
+  for _, line in ipairs(self.p:metric_data()) do
+    local boundary, count = line:match('^calculated_bucket{le="([^"]+)"} (%d+)\n$')
+    if boundary then
+      table.insert(boundaries, boundary == "+Inf" and math.huge or assert(tonumber(boundary)))
+      table.insert(counts, tonumber(count))
+    end
+  end
+  luaunit.assertNotEquals(boundaries[1], boundaries[2],
+    "Distinct floating-point boundaries must remain distinct in metric output")
+  luaunit.assertEquals(boundaries, {first_bound, second_bound, math.huge})
+  luaunit.assertEquals(counts, {1, 2, 2})
 end
 
 function TestPrometheus:testScalarHistogramSuffixes()

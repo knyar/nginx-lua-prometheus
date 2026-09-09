@@ -666,6 +666,19 @@ local function write_comments(self, output)
     self.parent.prefix, self.name, TYPE_LITERAL[self.typ]))
 end
 
+-- Find the shortest %g representation that round-trips to the same boundary.
+-- This runs only during registration; collection reuses the resulting labels.
+local function format_bucket_boundary(bucket)
+  local label, candidate
+  for precision = 1, 17 do
+    candidate = string.format("%." .. precision .. "g", bucket)
+    if tonumber(candidate) == bucket and (not label or #candidate <= #label) then
+      label = candidate
+    end
+  end
+  return label or candidate
+end
+
 -- Register a new metric.
 --
 -- Args:
@@ -746,14 +759,18 @@ local function register(self, name, help, label_names, buckets, typ)
     metric.buckets = buckets or DEFAULT_BUCKETS
     metric.bucket_count = #metric.buckets
     metric._key_index = self.histogram_key_index
-    -- Preserve double precision so distinct bucket layouts cannot share cells.
-    local bucket_keys = {}
+    -- Use the same lossless boundaries for layout keys and exposed labels.
+    metric.bucket_labels = {}
     for i, bucket in ipairs(metric.buckets) do
       assert(type(bucket) == "number", "bucket boundaries should be numeric")
-      bucket_keys[i] = string.format("%.17g", bucket)
+      assert(bucket == bucket and bucket > -math.huge and bucket < math.huge,
+        "bucket boundaries should be finite")
+      assert(i == 1 or bucket > metric.buckets[i - 1],
+        "bucket boundaries should be strictly increasing")
+      metric.bucket_labels[i] = format_bucket_boundary(bucket)
     end
     metric.histogram_prefix = HISTOGRAM_PREFIX ..
-      ngx.md5(table.concat(bucket_keys, ",")) .. ":"
+      ngx.md5(table.concat(metric.bucket_labels, ",")) .. ":"
   end
 
   self.registry[name] = metric
@@ -828,10 +845,7 @@ local function collect_histogram(self, metric, marker, output, seen_metrics)
     bucket_prefix = metric.name .. "_bucket" .. labels:sub(1, -2) .. ","
   end
   for i = 1, metric.bucket_count + 1 do
-    local bound = "+Inf"
-    if i <= metric.bucket_count then
-      bound = tostring(metric.buckets[i])
-    end
+    local bound = metric.bucket_labels[i] or "+Inf"
     table_insert_tail(output, string.format('%s%sle="%s"} %s\n',
       self.prefix, bucket_prefix, bound, counts[i]))
   end

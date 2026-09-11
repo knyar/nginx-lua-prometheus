@@ -4,17 +4,17 @@ This file only calls out major changes. Please see [the list of Git commits](
 https://github.com/knyar/nginx-lua-prometheus/commits/master) for the full list
 of changes.
 
-## Unreleased
+## 0.20260912
 
 - Fixed histogram inconsistencies during concurrent worker updates that could
   report observations in empty ranges or cause the `+Inf` bucket to differ from
-  `_count`. Empty buckets are now always exposed.
+  `_count`. Empty buckets are now always exposed (#179).
 - Fixed a precision issue with histogram bucket labels. Now full floating-point
   precision is preserved using a compact decimal representation.
 - Changed histogram storage to support these fixes. Existing histogram values
   were not migrated, so upgrading resets histogram series.
 - Improved bucket boundary validation. NaN, infinite, unsorted, or duplicate
-  histogram bucket boundaries are now rejected during registration.
+  histogram bucket boundaries are now rejected during registration (#180).
 - Added a warning when multiple Prometheus instances are using the same shared
   dictionary in one worker.
 

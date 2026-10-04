@@ -608,6 +608,8 @@ function Prometheus.init(dict_name, options_or_prefix)
   self.key_index = key_index_lib.new(self.dict, KEY_INDEX_PREFIX, reset_lookup)
   self.histogram_key_index = key_index_lib.new(
     self.dict, HISTOGRAM_PREFIX .. "index_", reset_lookup)
+  self.key_index:build_reverse()
+  self.histogram_key_index:build_reverse()
 
   self.initialized = true
 
@@ -659,8 +661,8 @@ function Prometheus:init_worker(sync_interval)
   self._counter = counter_instance
 
   ngx.timer.every(self.sync_interval, function (_)
-    self.key_index:sync()
-    self.histogram_key_index:sync()
+    self.key_index:sync_deletes()
+    self.histogram_key_index:sync_deletes()
   end)
 end
 

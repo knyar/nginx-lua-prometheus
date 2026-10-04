@@ -19,6 +19,9 @@ function SimpleDict:add(k, v)
   if k == "willnotfitk" or v == "willnotfitv" then
     forcible = true
   end
+  if self.dict and self.dict[k] ~= nil then
+    return false, "exists", false
+  end
   self:set(k, v)
   return true, nil, forcible  -- ok, err, forcible
 end
@@ -1274,6 +1277,121 @@ function TestKeyIndex:testSync()
   luaunit.assertEquals(keys[1], "key1")
   luaunit.assertEquals(keys[2], "key3")
   luaunit.assertEquals(self.last_deleted_key, "key2")
+end
+
+function TestKeyIndex:testAddDoesNotScanIndex()
+  for i = 1, 1000 do
+    self.key_index:add("key" .. i, "eviction_err")
+  end
+  -- a fresh worker adding existing and new keys
+  local key_index = require('prometheus_keys').new(self.dict, '_prefix_')
+  local gets = 0
+  local get = self.dict.get
+  self.dict.get = function(dict, k)
+    gets = gets + 1
+    return get(dict, k)
+  end
+  key_index:add({"key500", "key1001"}, "eviction_err")
+  self.dict.get = nil
+  luaunit.assertEquals(ngx.logs, nil)
+  luaunit.assertTrue(gets <= 4)
+  luaunit.assertEquals(key_index.index["key500"], 500)
+  luaunit.assertEquals(key_index.index["key1001"], 1001)
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), 1001)
+end
+
+function TestKeyIndex:testBuildReverse()
+  -- keys stored by a version without reverse entries
+  self.dict:set("_prefix_key_count", 2)
+  self.dict:set("_prefix_key_1", "key1")
+  self.dict:set("_prefix_key_2", "key2")
+  self.key_index:build_reverse()
+  luaunit.assertEquals(self.dict:get("_prefix_rkey_key1"), 1)
+  luaunit.assertEquals(self.dict:get("_prefix_rkey_key2"), 2)
+  luaunit.assertEquals(self.dict:get("_prefix_rkey_upto"), 2)
+  luaunit.assertEquals(self.dict:get("_prefix_rkey_lock"), nil)
+
+  -- existing key is found, not duplicated
+  self.key_index:add("key2", "eviction_err")
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), 2)
+
+  -- only keys added since the previous call are scanned
+  self.dict:set("_prefix_key_count", 3)
+  self.dict:set("_prefix_key_3", "key3")
+  self.dict:set("_prefix_key_1", "changed")
+  self.key_index:build_reverse()
+  luaunit.assertEquals(self.dict:get("_prefix_rkey_key3"), 3)
+  luaunit.assertEquals(self.dict:get("_prefix_rkey_changed"), nil)
+
+  -- skipped while another worker holds the lock
+  self.dict:set("_prefix_key_count", 4)
+  self.dict:set("_prefix_key_4", "key4")
+  self.dict:set("_prefix_rkey_lock", true)
+  self.key_index:build_reverse()
+  luaunit.assertEquals(self.dict:get("_prefix_rkey_key4"), nil)
+  luaunit.assertEquals(self.dict:get("_prefix_rkey_upto"), 3)
+end
+
+function TestKeyIndex:testConcurrentAdd()
+  local other = require('prometheus_keys').new(self.dict, '_prefix_')
+  -- both workers miss the reverse entry, then insert
+  self.key_index:insert("key1", false, "eviction_err")
+  other:insert("key1", false, "eviction_err")
+  luaunit.assertEquals(other.index["key1"], self.key_index.index["key1"])
+  luaunit.assertEquals(self.dict:get("_prefix_key_2"), nil)
+  local keys = other:list()
+  luaunit.assertEquals(#keys, 1)
+  luaunit.assertEquals(keys[1], "key1")
+end
+
+function TestKeyIndex:testListHidesDuplicates()
+  self.dict:set("_prefix_key_count", 2)
+  self.dict:set("_prefix_key_1", "key1")
+  self.dict:set("_prefix_key_2", "key1")
+  local keys = self.key_index:list()
+  luaunit.assertEquals(#keys, 1)
+  luaunit.assertEquals(keys[1], "key1")
+end
+
+function TestKeyIndex:testStaleReverseEntry()
+  self.key_index:add("key1", "eviction_err")
+  -- slot evicted, reverse entry left behind
+  self.dict:delete("_prefix_key_1")
+  local key_index = require('prometheus_keys').new(self.dict, '_prefix_')
+  key_index:add("key1", "eviction_err")
+  luaunit.assertEquals(key_index.index["key1"], 2)
+  luaunit.assertEquals(self.dict:get("_prefix_key_2"), "key1")
+  luaunit.assertEquals(self.dict:get("_prefix_rkey_key1"), 2)
+end
+
+function TestKeyIndex:testKeyCountBehindOccupiedSlots()
+  -- e.g. flush_all() while another worker was adding a key
+  self.dict:set("_prefix_key_count", 1)
+  self.dict:set("_prefix_key_1", "key1")
+  self.dict:set("_prefix_key_2", "key2")
+  self.key_index:add("key3", "eviction_err")
+  luaunit.assertEquals(self.key_index.index["key3"], 3)
+  luaunit.assertEquals(self.dict:get("_prefix_key_3"), "key3")
+  luaunit.assertEquals(self.dict:get("_prefix_key_count"), 3)
+end
+
+function TestKeyIndex:testSyncDeletes()
+  self.last_deleted_key = nil
+  self.key_index:add({"key1", "key2"}, "eviction_err")
+  -- a fresh worker does not treat earlier deletes as new
+  self.dict:set("_prefix_delete_count", 5)
+  local key_index = require('prometheus_keys').new(self.dict, '_prefix_',
+    function(key) self.last_deleted_key = key end)
+  key_index:sync_deletes()
+  luaunit.assertEquals(self.last_deleted_key, nil)
+  luaunit.assertEquals(key_index.last, 0)
+
+  key_index:add({"key1", "key2"}, "eviction_err")
+  self.dict:delete("_prefix_key_2")
+  self.dict:set("_prefix_delete_count", 6)
+  key_index:sync_deletes()
+  luaunit.assertEquals(self.last_deleted_key, "key2")
+  luaunit.assertEquals(key_index.index["key2"], nil)
 end
 
 function TestPrometheus.testPrintfTable()
